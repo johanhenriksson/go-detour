@@ -39,7 +39,16 @@ func (sm *SoloMesh) SetSettings(s recast.BuildSettings) {
 // LoadGeometry loads geometry from r that reads from a geometry definition
 // file.
 func (sm *SoloMesh) LoadGeometry(r io.Reader) error {
-	return sm.geom.LoadOBJMesh(r)
+	mesh, err := recast.NewMeshLoaderOBJ(r)
+	if err != nil {
+		return err
+	}
+	geom, err := recast.NewInputGeom(mesh.Verts(), mesh.Tris())
+	if err != nil {
+		return err
+	}
+	sm.geom = *geom
+	return nil
 }
 
 // InputGeom returns the nav mesh input geometry.
@@ -50,17 +59,12 @@ func (sm *SoloMesh) InputGeom() *recast.InputGeom {
 // Build builds the navigation mesh for the input geometry provided
 // TODO: should return an error instead of bool
 func (sm *SoloMesh) Build() (*detour.NavMesh, bool) {
-	if sm.geom.Mesh() == nil {
-		// TODO: error "no vertices and triangles"
-		return nil, false
-	}
-
 	bmin := sm.geom.NavMeshBoundsMin()
 	bmax := sm.geom.NavMeshBoundsMax()
-	verts := sm.geom.Mesh().Verts()
-	nverts := sm.geom.Mesh().VertCount()
-	tris := sm.geom.Mesh().Tris()
-	ntris := sm.geom.Mesh().TriCount()
+	verts := sm.geom.Verts()
+	nverts := sm.geom.NumVerts()
+	tris := sm.geom.Tris()
+	ntris := sm.geom.NumTris()
 
 	//
 	// Step 1. Initialize build config.

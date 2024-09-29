@@ -119,16 +119,18 @@ func subdivide(items []BoundsItem, nitems, imin, imax, trisPerChunk int32,
 
 // Creates partitioned triangle mesh (AABB tree),
 // where each node contains at max trisPerChunk triangles.
-func createChunkyTriMesh(verts []float32, tris []int32, ntris, trisPerChunk int32, cm *ChunkyTriMesh) bool {
+func NewChunkyTriMesh(verts []float32, tris []int32, trisPerChunk int32) (*ChunkyTriMesh, bool) {
+	cm := &ChunkyTriMesh{}
+	ntris := int32(len(tris) / 3)
 	nchunks := (ntris + trisPerChunk - 1) / trisPerChunk
 	cm.Nodes = make([]ChunkyTriMeshNode, nchunks*4)
 	if len(cm.Nodes) == 0 {
-		return false
+		return nil, false
 	}
 
 	cm.Tris = make([]int32, ntris*3)
 	if len(cm.Tris) == 0 {
-		return false
+		return nil, false
 	}
 
 	cm.Ntris = ntris
@@ -136,7 +138,7 @@ func createChunkyTriMesh(verts []float32, tris []int32, ntris, trisPerChunk int3
 	// Build tree
 	items := make([]BoundsItem, ntris)
 	if len(items) == 0 {
-		return false
+		return nil, false
 	}
 
 	for i := int32(0); i < ntris; i++ {
@@ -187,7 +189,7 @@ func createChunkyTriMesh(verts []float32, tris []int32, ntris, trisPerChunk int3
 		}
 	}
 
-	return true
+	return cm, true
 }
 
 func checkOverlapRect(amin, amax, bmin, bmax [2]float32) bool {

@@ -62,7 +62,16 @@ func (tm *TileMesh) SetSettings(s recast.BuildSettings) {
 // LoadGeometry loads geometry from r that reads from a geometry definition
 // file.
 func (tm *TileMesh) LoadGeometry(r io.Reader) error {
-	return tm.geom.LoadOBJMesh(r)
+	mesh, err := recast.NewMeshLoaderOBJ(r)
+	if err != nil {
+		return err
+	}
+	geom, err := recast.NewInputGeom(mesh.Verts(), mesh.Tris())
+	if err != nil {
+		return err
+	}
+	tm.geom = *geom
+	return nil
 }
 
 // InputGeom returns the nav mesh input geometry.
@@ -72,11 +81,6 @@ func (tm *TileMesh) InputGeom() *recast.InputGeom {
 
 // Build builds the navigation mesh for the input geometry provided
 func (tm *TileMesh) Build() (*detour.NavMesh, bool) {
-	if tm.geom.Mesh() == nil {
-		// TODO: error "no vertices and triangles"
-		return nil, false
-	}
-
 	bmin := tm.geom.NavMeshBoundsMin()
 	bmax := tm.geom.NavMeshBoundsMax()
 	gw, gh := recast.CalcGridSize(bmin[:], bmax[:], tm.settings.CellSize)
@@ -158,7 +162,7 @@ func (tm *TileMesh) buildAllTiles() (*detour.NavMesh, bool) {
 }
 
 func (tm *TileMesh) buildTileMesh(tx, ty int32, bmin, bmax []float32) []byte {
-	if tm.geom.Mesh() == nil || tm.geom.ChunkyMesh() == nil {
+	if tm.geom.ChunkyMesh() == nil {
 		tm.ctx.Errorf("buildNavigation: Input mesh is not specified.")
 		return nil
 	}
@@ -166,10 +170,9 @@ func (tm *TileMesh) buildTileMesh(tx, ty int32, bmin, bmax []float32) []byte {
 	tm.tileMemUsage = 0
 	tm.tileBuildTime = 0
 
-	verts := tm.geom.Mesh().Verts()
-	nverts := tm.geom.Mesh().VertCount()
-	//tris := sm.geom.Mesh().Tris()
-	ntris := tm.geom.Mesh().TriCount()
+	verts := tm.geom.Verts()
+	nverts := tm.geom.NumVerts()
+	ntris := tm.geom.NumTris()
 	chunkyMesh := tm.geom.ChunkyMesh()
 
 	//

@@ -83,8 +83,7 @@ func TestCalcBounds(t *testing.T) {
 	}
 
 	for _, tt := range ttable {
-		var bmin, bmax [3]float32
-		CalcBounds(tt.verts, int32(len(tt.verts)/3), bmin[:], bmax[:])
+		bmin, bmax := CalcBounds(tt.verts)
 
 		for i := 0; i < 3; i++ {
 			if bmin[i] != tt.wantmin[i] {
@@ -102,8 +101,7 @@ func TestCalcGridSize(t *testing.T) {
 		1, 2, 3,
 		0, 2, 6,
 	}
-	var bmin, bmax [3]float32
-	CalcBounds(verts, 2, bmin[:], bmax[:])
+	bmin, bmax := CalcBounds(verts)
 
 	cellSize := float32(1.5)
 
@@ -121,8 +119,7 @@ func TestCreateHeightfield(t *testing.T) {
 		1, 2, 3,
 		0, 2, 6,
 	}
-	var bmin, bmax [3]float32
-	CalcBounds(verts, 2, bmin[:], bmax[:])
+	bmin, bmax := CalcBounds(verts)
 
 	cellSize := float32(1.5)
 	cellHeight := float32(2)
@@ -259,8 +256,7 @@ func TestAddSpan(t *testing.T) {
 		1, 2, 3,
 		0, 2, 6,
 	}
-	var bmin, bmax [3]float32
-	CalcBounds(verts, 2, bmin[:], bmax[:])
+	bmin, bmax := CalcBounds(verts)
 
 	cellSize := float32(1.5)
 	cellHeight := float32(2)
@@ -419,8 +415,7 @@ func TestRasterizeTriangle(t *testing.T) {
 		1, 0, 0,
 		0, 0, -1,
 	}
-	var bmin, bmax [3]float32
-	CalcBounds(verts, 3, bmin[:], bmax[:])
+	bmin, bmax := CalcBounds(verts)
 
 	cellSize := float32(0.5)
 	cellHeight := float32(0.5)
@@ -471,8 +466,7 @@ func TestRasterizeTriangles(t *testing.T) {
 		1,
 		2,
 	}
-	var bmin, bmax [3]float32
-	CalcBounds(verts, 4, bmin[:], bmax[:])
+	bmin, bmax := CalcBounds(verts)
 
 	cellSize := float32(0.5)
 	cellHeight := float32(0.5)
