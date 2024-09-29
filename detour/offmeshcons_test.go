@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func TestOffMeshConnections(t *testing.T) {
@@ -17,10 +17,10 @@ func TestOffMeshConnections(t *testing.T) {
 	)
 
 	pathTests := []struct {
-		org, dst           d3.Vec3
+		org, dst           vec3.T
 		incFlags, excFlags uint16 // query filter include/exclude flags
 		wantPath           []PolyRef
-		wantStraightPath   []d3.Vec3
+		wantStraightPath   []vec3.T
 	}{
 		{
 			// latest result:
@@ -50,19 +50,18 @@ func TestOffMeshConnections(t *testing.T) {
 			//d3.Vec3{20.308548, 11.554298, -57.635326},
 			//d3.Vec3{-17.323172, 3.074387, -3.366402},
 			//d3.Vec3{-4.377790, -0.000053, -1.633406},
-			d3.Vec3{-19.460140, 4.234787, -4.727699},
-			d3.Vec3{-1.402759, -0.000092, -2.314920},
+			vec3.New(-19.460140, 4.234787, -4.727699),
+			vec3.New(-1.402759, -0.000092, -2.314920),
 
 			0xffef, // all poly but the disabled ones
 			0x0,
 			//[]PolyRef{0x600029, 0x600023, 0x600025, 0x60001d, 0x60001c, 0x60001e, 0x600020, 0x60001f, 0x600016, 0x600012, 0x60000b, 0x600018, 0x600015, 0x600006, 0x600005, 0x600007, 0x600008, 0x600034},
 			[]PolyRef{0x600029, 0x60003d, 0x600034},
-			[]d3.Vec3{
-
-				d3.NewVec3XYZ(-19.460140, 4.234787, -4.727699),
-				d3.NewVec3XYZ(-17.767578, 2.514686, -0.300116),
-				d3.NewVec3XYZ(-6.194458, 0.197294, 1.019781),
-				d3.NewVec3XYZ(-1.402759, -0.000092, -2.314920),
+			[]vec3.T{
+				vec3.New(-19.460140, 4.234787, -4.727699),
+				vec3.New(-17.767578, 2.514686, -0.300116),
+				vec3.New(-6.194458, 0.197294, 1.019781),
+				vec3.New(-1.402759, -0.000092, -2.314920),
 			},
 
 			/*         []d3.Vec3{*/
@@ -86,7 +85,7 @@ func TestOffMeshConnections(t *testing.T) {
 			query          *NavMeshQuery        // the query instance
 			filter         *StandardQueryFilter // the query filter
 			orgRef, dstRef PolyRef              // find poly query results
-			org, dst       d3.Vec3              // find poly query results
+			org, dst       vec3.T               // find poly query results
 			st             Status               // status flags
 			path           []PolyRef            // returned path
 		)
@@ -96,7 +95,7 @@ func TestOffMeshConnections(t *testing.T) {
 			t.Error("query creation failed:", st)
 		}
 		// define the extents vector for the nearest polygon query
-		extents := d3.NewVec3XYZ(2, 2, 2)
+		extents := vec3.New(2, 2, 2)
 
 		// create a default query filter
 		filter = NewStandardQueryFilter()
@@ -169,7 +168,7 @@ func TestOffMeshConnections(t *testing.T) {
 
 		// FindStraightPath
 		var (
-			straightPath      []d3.Vec3
+			straightPath      []vec3.T
 			straightPathFlags []uint8
 			straightPathRefs  []PolyRef
 			straightPathCount int
@@ -177,10 +176,7 @@ func TestOffMeshConnections(t *testing.T) {
 		)
 		// slices that receive the straight path
 		maxStraightPath = 100
-		straightPath = make([]d3.Vec3, maxStraightPath)
-		for i := range straightPath {
-			straightPath[i] = d3.NewVec3()
-		}
+		straightPath = make([]vec3.T, maxStraightPath)
 		straightPathFlags = make([]uint8, maxStraightPath)
 		straightPathRefs = make([]PolyRef, maxStraightPath)
 
@@ -205,7 +201,7 @@ func TestOffMeshConnections(t *testing.T) {
 			log.Printf("straightPath[%d].Flags = 0x%x\n", i, straightPathFlags[i])
 		}
 		for i := 0; i < pathCount; i++ {
-			if !straightPath[i].Approx(tt.wantStraightPath[i]) {
+			if !straightPath[i].ApproxEqual(tt.wantStraightPath[i]) {
 				t.Errorf("straightPath[%d] = %v, want %v", i, straightPath[i], tt.wantStraightPath[i])
 			}
 		}

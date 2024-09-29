@@ -1,6 +1,8 @@
 package detour
 
-import "github.com/arl/gogeo/f32/d3"
+import (
+	"github.com/johanhenriksson/goworld/math/vec3"
+)
 
 // Poly defines a polygon within a MeshTile object.
 type Poly struct {
@@ -55,15 +57,12 @@ func (p *Poly) Type() uint8 {
 //	idx     polygon indices. [(vertIndex) * nidx]
 //	nidx    number of indices in the polygon. (limit: >= 3)
 //	verts   polygon vertices. [(x, y, z) * vertCount]
-func CalcPolyCenter(idx []uint16, nidx int32, verts []float32) d3.Vec3 {
-	tc := d3.NewVec3()
-	var j int32
-	for j = 0; j < nidx; j++ {
+func CalcPolyCenter(idx []uint16, nidx int32, verts []float32) vec3.T {
+	tc := vec3.Zero
+	for j := 0; j < int(nidx); j++ {
 		start := idx[j] * 3
-		v := verts[start : start+3]
-		tc[0] += v[0]
-		tc[1] += v[1]
-		tc[2] += v[2]
+		v := vec3.FromSlice(verts[start:])
+		tc = tc.Add(v)
 	}
-	return tc.Scale(1 / float32(nidx))
+	return tc.Scaled(1 / float32(nidx))
 }
