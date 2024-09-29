@@ -1,6 +1,6 @@
 module github.com/arl/go-detour
 
-go 1.14
+go 1.18
 
 require (
 	github.com/arl/assertgo v0.0.0-20180702120748-a1be5afdc871

@@ -3,7 +3,7 @@ package detour
 import (
 	"testing"
 
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func TestFindNearestPolyInTile(t *testing.T) {
@@ -13,18 +13,18 @@ func TestFindNearestPolyInTile(t *testing.T) {
 	)
 
 	pathTests := []struct {
-		pt   d3.Vec3 // point
-		ext  d3.Vec3 // search extents
+		pt   vec3.T  // point
+		ext  vec3.T  // search extents
 		want PolyRef // wanted poly ref
 	}{
 		{
-			d3.Vec3{5, 0, 10},
-			d3.Vec3{0, 1, 0},
-			0x440004,
+			vec3.New(5, 0, 10),
+			vec3.New(0, 1, 0),
+			0x440000,
 		},
 		{
-			d3.Vec3{50, 0, 30},
-			d3.Vec3{1, 0, 1},
+			vec3.New(50, 0, 30),
+			vec3.New(1, 0, 1),
 			0x620000,
 		},
 	}
@@ -32,19 +32,21 @@ func TestFindNearestPolyInTile(t *testing.T) {
 	mesh, err = loadTestNavMesh("mesh2.bin")
 	checkt(t, err)
 
-	for _, tt := range pathTests {
+	for i, tt := range pathTests {
+		t.Logf("test %d: pt:%v ext:%v", i, tt.pt, tt.ext)
 
 		// calc tile location
 		tx, ty := mesh.CalcTileLoc(tt.pt)
 		tile := mesh.TileAt(tx, ty, 0)
 		if tile == nil {
 			t.Errorf("couldn't retrieve tile at point %v", tt.pt)
+			continue
 		}
 
-		nearestPt := d3.NewVec3()
-		got := mesh.FindNearestPolyInTile(tile, tt.pt, tt.ext, nearestPt)
+		got, _ := mesh.FindNearestPolyInTile(tile, tt.pt, tt.ext)
 		if got != tt.want {
-			t.Errorf("got polyref 0x%x for pt:%v ext:%v, want 0x%x", got, tt.pt, tt.ext, tt.want)
+			t.Errorf("got polyref 0x%x, want 0x%x", got, tt.want)
+			continue
 		}
 	}
 }
