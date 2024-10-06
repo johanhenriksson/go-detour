@@ -81,24 +81,15 @@ func TestOffMeshConnections(t *testing.T) {
 	checkt(t, err)
 
 	for _, tt := range pathTests {
-		var (
-			query          *NavMeshQuery        // the query instance
-			filter         *StandardQueryFilter // the query filter
-			orgRef, dstRef PolyRef              // find poly query results
-			org, dst       vec3.T               // find poly query results
-			st             Status               // status flags
-			path           []PolyRef            // returned path
-		)
-
-		st, query = NewNavMeshQuery(mesh, 1000)
-		if StatusFailed(st) {
-			t.Error("query creation failed:", st)
+		query, err := NewNavMeshQuery(mesh, 1000)
+		if err != nil {
+			t.Error("query creation failed:", err)
 		}
 		// define the extents vector for the nearest polygon query
 		extents := vec3.New(2, 2, 2)
 
 		// create a default query filter
-		filter = NewStandardQueryFilter()
+		filter := NewStandardQueryFilter()
 		filter.SetIncludeFlags(tt.incFlags)
 		filter.SetExcludeFlags(tt.excFlags)
 
@@ -131,9 +122,9 @@ func TestOffMeshConnections(t *testing.T) {
 		filter.SetAreaCost(samplePolyAreaJump, 1.5)
 
 		// get org polygon reference
-		st, orgRef, org = query.FindNearestPoly(tt.org, extents, filter)
-		if StatusFailed(st) {
-			t.Fatal("couldn't find nearest poly of", tt.org, ":", st)
+		orgRef, org, err := query.FindNearestPoly(tt.org, extents, filter)
+		if err != nil {
+			t.Fatal("couldn't find nearest poly of", tt.org, ":", err)
 		}
 		if !mesh.IsValidPolyRef(orgRef) {
 			t.Fatal("orgRef", orgRef, "is not a valid poly ref")
@@ -142,9 +133,9 @@ func TestOffMeshConnections(t *testing.T) {
 		t.Logf("org poly reference:0x%x\n", orgRef)
 
 		// get dst polygon reference
-		st, dstRef, dst = query.FindNearestPoly(tt.dst, extents, filter)
-		if StatusFailed(st) {
-			t.Fatal("couldn't find nearest poly of", tt.dst, ":", st)
+		dstRef, dst, err := query.FindNearestPoly(tt.dst, extents, filter)
+		if err != nil {
+			t.Fatal("couldn't find nearest poly of", tt.dst, ":", err)
 		}
 		if !mesh.IsValidPolyRef(dstRef) {
 			t.Fatal("dstRef", dstRef, "is not a valid poly ref")
@@ -153,44 +144,36 @@ func TestOffMeshConnections(t *testing.T) {
 		t.Logf("dst poly reference:0x%x\n", dstRef)
 
 		// FindPath
-		var (
-			pathCount int
-		)
-		path = make([]PolyRef, 100)
-		pathCount, st = query.FindPath(orgRef, dstRef, org, dst, filter, path)
-		if StatusFailed(st) {
-			t.Fatal("query.FindPath failed:", st)
+		path := make([]PolyRef, 100)
+		path, err = query.FindPath(orgRef, dstRef, org, dst, filter, path)
+		if err != nil {
+			t.Fatal("query.FindPath failed:", err)
 		}
 
-		if !reflect.DeepEqual(tt.wantPath, path[:pathCount]) {
-			t.Fatalf("found path is not correct, want %#v, got %#v", tt.wantPath, path[:pathCount])
+		if !reflect.DeepEqual(tt.wantPath, path) {
+			t.Fatalf("found path is not correct, want %#v, got %#v", tt.wantPath, path)
 		}
 
 		// FindStraightPath
 		var (
-			straightPath      []vec3.T
-			straightPathFlags []uint8
-			straightPathRefs  []PolyRef
 			straightPathCount int
 			maxStraightPath   int32
 		)
 		// slices that receive the straight path
 		maxStraightPath = 100
-		straightPath = make([]vec3.T, maxStraightPath)
-		straightPathFlags = make([]uint8, maxStraightPath)
-		straightPathRefs = make([]PolyRef, maxStraightPath)
+		straightPath := make([]Path, maxStraightPath)
 
-		straightPathCount, st = query.FindStraightPath(tt.org, tt.dst, path[:pathCount], straightPath, straightPathFlags, straightPathRefs, 0)
-		if StatusFailed(st) {
-			t.Fatal("query.FindStraightPath failed:", st)
+		straightPathCount, err = query.FindStraightPath(tt.org, tt.dst, path, straightPath, 0)
+		if err != nil {
+			t.Fatal("query.FindStraightPath failed:", err)
 		}
 
-		if (straightPathFlags[0] & StraightPathStart) == 0 {
+		if (straightPath[0].Flags & StraightPathStart) == 0 {
 			t.Fatal("straightPath start is not flagged StraightPathStart")
 		}
 
 		fmt.Println("StraightPathCount == ", straightPathCount)
-		if (straightPathFlags[straightPathCount-1] & StraightPathEnd) == 0 {
+		if (straightPath[straightPathCount-1].Flags & StraightPathEnd) == 0 {
 			t.Fatal("straightPath end is not flagged StraightPathEnd")
 		}
 
@@ -198,10 +181,10 @@ func TestOffMeshConnections(t *testing.T) {
 			t.Fatalf("found path and wanted path do not have the same length (%d != %d)", straightPathCount, len(tt.wantStraightPath))
 		}
 		for i := 0; i < straightPathCount; i++ {
-			log.Printf("straightPath[%d].Flags = 0x%x\n", i, straightPathFlags[i])
+			log.Printf("straightPath[%d].Flags = 0x%x\n", i, straightPath[i].Flags)
 		}
-		for i := 0; i < pathCount; i++ {
-			if !straightPath[i].ApproxEqual(tt.wantStraightPath[i]) {
+		for i := 0; i < len(path); i++ {
+			if !straightPath[i].Point.ApproxEqual(tt.wantStraightPath[i]) {
 				t.Errorf("straightPath[%d] = %v, want %v", i, straightPath[i], tt.wantStraightPath[i])
 			}
 		}

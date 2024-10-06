@@ -84,9 +84,8 @@ func Decode(r io.Reader) (*NavMesh, error) {
 	}
 
 	var mesh NavMesh
-	status := mesh.Init(&hdr.Params)
-	if StatusFailed(status) {
-		return nil, fmt.Errorf("status failed 0x%x", status)
+	if err := mesh.Init(&hdr.Params); err != nil {
+		return nil, err
 	}
 
 	// Read tiles.
@@ -110,9 +109,8 @@ func Decode(r io.Reader) (*NavMesh, error) {
 		if err != nil {
 			return nil, err
 		}
-		status, _ := mesh.AddTile(data, tileHdr.TileRef)
-		if status&Failure != 0 {
-			return nil, fmt.Errorf("couldn't add tile %d(), status: 0x%x", i, status)
+		if _, err := mesh.AddTile(data, tileHdr.TileRef); err != nil {
+			return nil, fmt.Errorf("couldnt add tile %d(), error: %w", i, err)
 		}
 	}
 	return &mesh, nil
@@ -177,16 +175,16 @@ func (m *NavMesh) SaveToFile(fn string) error {
 // Return The status flags for the operation.
 //
 //	see CreateNavMeshData
-func (m *NavMesh) InitForSingleTile(data []uint8, flags int) Status {
+func (m *NavMesh) InitForSingleTile(data []uint8, flags int) error {
 	var header MeshHeader
 	header.unserialize(data)
 
 	// Make sure the data is in right format.
 	if header.Magic != navMeshMagic {
-		return Failure | WrongMagic
+		return ErrWrongMagic
 	}
 	if header.Version != navMeshVersion {
-		return Failure | WrongVersion
+		return ErrWrongVersion
 	}
 
 	var params NavMeshParams
@@ -196,13 +194,12 @@ func (m *NavMesh) InitForSingleTile(data []uint8, flags int) Status {
 	params.MaxTiles = 1
 	params.MaxPolys = uint32(header.PolyCount)
 
-	status := m.Init(&params)
-	if StatusFailed(status) {
-		return status
+	if err := m.Init(&params); err != nil {
+		return err
 	}
 
-	status, _ = m.AddTile(data, TileRef(flags))
-	return status
+	_, err := m.AddTile(data, TileRef(flags))
+	return err
 }
 
 // Init initializes the navigation mesh for tiled use.
@@ -211,7 +208,7 @@ func (m *NavMesh) InitForSingleTile(data []uint8, flags int) Status {
 //	 params  Initialization parameters.
 //
 // Return the status flags for the operation.
-func (m *NavMesh) Init(params *NavMeshParams) Status {
+func (m *NavMesh) Init(params *NavMeshParams) error {
 	m.Params = *params
 	m.Orig = params.Orig
 	m.TileWidth = params.TileWidth
@@ -246,10 +243,10 @@ func (m *NavMesh) Init(params *NavMeshParams) Status {
 
 	// if m.saltBits < 10 {
 	if m.saltBits < 8 {
-		return Status(Failure | InvalidParam)
+		return ErrInvalidParam
 	}
 
-	return Success
+	return nil
 }
 
 // AddTile adds a tile to the navigation mesh.
@@ -277,21 +274,21 @@ func (m *NavMesh) Init(params *NavMeshParams) Status {
 // removed from this nav mesh.
 //
 // see CreateNavMeshData, removeTileBvTree
-func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
+func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (TileRef, error) {
 	var hdr MeshHeader
 	hdr.unserialize(data)
 
 	// Make sure the data is in right format.
 	if hdr.Magic != navMeshMagic {
-		return Failure | WrongMagic, 0
+		return 0, ErrWrongMagic
 	}
 	if hdr.Version != navMeshVersion {
-		return Failure | WrongVersion, 0
+		return 0, ErrWrongVersion
 	}
 
 	// Make sure the location is free.
 	if m.TileAt(hdr.X, hdr.Y, hdr.Layer) != nil {
-		return Failure, 0
+		return 0, ErrFailure
 	}
 
 	// Allocate a tile.
@@ -307,7 +304,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 		tileIndex := int32(m.decodePolyIDTile(PolyRef(lastRef)))
 		if tileIndex >= m.MaxTiles {
 			log.Fatalln("tileIndex >= m.m_maxTiles", tileIndex, m.MaxTiles)
-			return Failure | OutOfMemory, 0
+			return 0, ErrOutOfMemory
 		}
 		// Try to find the specific tile id from the free list.
 		target := &m.Tiles[tileIndex]
@@ -320,7 +317,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 		// Could not find the correct location.
 		if tile != target {
 			log.Fatalln("couldn't find the correct tile location")
-			return Failure | OutOfMemory, 0
+			return 0, ErrFailure
 		}
 		// Remove from freelist
 		if prev == nil {
@@ -336,7 +333,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 	// Make sure we could allocate a tile.
 	if tile == nil {
 		log.Fatalln("couldn't allocate tile")
-		return Failure | OutOfMemory, 0
+		return 0, ErrOutOfMemory
 	}
 
 	// Insert tile into the position lut.
@@ -404,7 +401,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 		}
 	}
 
-	return Success, m.TileRef(tile)
+	return m.TileRef(tile), nil
 }
 
 // Removes the specified tile from the navigation mesh.
@@ -420,18 +417,18 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 // it can be added back to the navigation mesh at a later point.
 //
 // see AddTile
-func (m *NavMesh) RemoveTile(ref TileRef) (data []uint8, st Status) {
+func (m *NavMesh) RemoveTile(ref TileRef) (data []uint8, err error) {
 	if ref == 0 {
-		return data, Failure | InvalidParam
+		return data, ErrInvalidParam
 	}
 	tileIndex := m.decodePolyIDTile(PolyRef(ref))
 	tileSalt := m.decodePolyIDSalt(PolyRef(ref))
 	if tileIndex >= uint32(m.MaxTiles) {
-		return data, Failure | InvalidParam
+		return data, ErrInvalidParam
 	}
 	tile := &m.Tiles[tileIndex]
 	if tile.Salt != tileSalt {
-		return data, Failure | InvalidParam
+		return data, ErrInvalidParam
 	}
 	if tile.Data != nil {
 		data = tile.Data
@@ -504,7 +501,7 @@ func (m *NavMesh) RemoveTile(ref TileRef) (data []uint8, st Status) {
 	tile.Next = m.nextFree
 	m.nextFree = tile
 
-	return data, Success
+	return data, nil
 }
 
 // TileAt returns the tile at the specified grid location.
@@ -829,13 +826,6 @@ func (m *NavMesh) FindNearestPolyInTile(tile *MeshTile, center, extents vec3.T) 
 	for _, ref := range polys {
 		var d float32
 		closestPtPoly, posOverPoly := m.closestPointOnPoly(ref, center)
-		log.Printf("candidate ref 0x%x closest pt %s, over: %t\n", ref, closestPtPoly, posOverPoly)
-
-		_, poly := m.TileAndPolyByRefUnsafe(ref)
-		for i := 0; i < int(poly.VertCount); i++ {
-			v := vec3.FromSlice(tile.Verts[poly.Verts[i]*3:])
-			log.Printf("  vert %d: %s\n", i, v)
-		}
 
 		// If a point is directly over a polygon and closer than
 		// climb height, favor that instead of straight line nearest point.
@@ -1561,24 +1551,24 @@ func (m *NavMesh) IsValidPolyRef(ref PolyRef) bool {
 //	 [out]poly    The polygon.
 //
 // TODO: Use Go-idioms: change signature and returns tile and poly
-func (m *NavMesh) TileAndPolyByRef(ref PolyRef) (*MeshTile, *Poly, Status) {
+func (m *NavMesh) TileAndPolyByRef(ref PolyRef) (*MeshTile, *Poly, error) {
 	if ref == 0 {
-		return nil, nil, Failure
+		return nil, nil, ErrFailure
 	}
 	var salt, it, ip uint32
 	m.DecodePolyID(ref, &salt, &it, &ip)
 	if it >= uint32(m.MaxTiles) {
-		return nil, nil, Failure | InvalidParam
+		return nil, nil, ErrInvalidParam
 	}
 	if m.Tiles[it].Salt != salt || m.Tiles[it].Header == nil {
-		return nil, nil, Failure | InvalidParam
+		return nil, nil, ErrInvalidParam
 	}
 	if ip >= uint32(m.Tiles[it].Header.PolyCount) {
-		return nil, nil, Failure | InvalidParam
+		return nil, nil, ErrInvalidParam
 	}
 	tile := &m.Tiles[it]
 	poly := &m.Tiles[it].Polys[ip]
-	return tile, poly, Success
+	return tile, poly, nil
 }
 
 // CalcTileLoc calculates the tile grid location for the specified world
