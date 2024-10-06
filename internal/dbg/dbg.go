@@ -7,7 +7,7 @@ import (
 
 	assert "github.com/arl/assertgo"
 	"github.com/arl/go-detour/detour"
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func check(err error) {
@@ -38,8 +38,8 @@ func main() {
 	fmt.Printf("mesh params: %#v\n", mesh.Params)
 	fmt.Println("Navigation Query")
 
-	org := d3.NewVec3XYZ(3, 0, 1)
-	dst := d3.NewVec3XYZ(50, 0, 30)
+	org := vec3.New(3, 0, 1)
+	dst := vec3.New(50, 0, 30)
 
 	path, err := findPath(mesh, org, dst)
 	if err != nil {
@@ -48,59 +48,46 @@ func main() {
 	log.Println("findPath success, path:", path)
 }
 
-func findPath(mesh *detour.NavMesh, org, dst d3.Vec3) ([]detour.PolyRef, error) {
-	var (
-		orgRef, dstRef detour.PolyRef       // references of org/dst polygon refs
-		query          *detour.NavMeshQuery // the query instance
-		filter         detour.QueryFilter   // filter to use for various queries
-		extents        d3.Vec3              // search distance for polygon search (3 axis)
-		nearestPt      d3.Vec3
-		st             detour.Status
-		path           []detour.PolyRef
-	)
-
-	st, query = detour.NewNavMeshQuery(mesh, 1000)
-	if detour.StatusFailed(st) {
-		return path, fmt.Errorf("query creation failed with status %v\n", st)
+func findPath(mesh *detour.NavMesh, org, dst vec3.T) ([]detour.PolyRef, error) {
+	query, err := detour.NewNavMeshQuery(mesh, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("query creation failed with error %s\n", err)
 	}
 	// define the extents vector for the nearest polygon query
-	extents = d3.NewVec3XYZ(0, 2, 0)
+	extents := vec3.New(0, 2, 0)
 
 	// create a default query filter
-	filter = detour.NewStandardQueryFilter()
+	filter := detour.NewStandardQueryFilter()
 
 	// get org polygon reference
-	st, orgRef, nearestPt = query.FindNearestPoly(org, extents, filter)
-	if detour.StatusFailed(st) {
-		return path, fmt.Errorf("FindNearestPoly failed with %v\n", st)
+	orgRef, nearestPt, err := query.FindNearestPoly(org, extents, filter)
+	if err != nil {
+		return nil, fmt.Errorf("FindNearestPoly failed with %v\n", err)
 	} else if orgRef == 0 {
-		return path, fmt.Errorf("org doesn't intersect any polygons")
+		return nil, fmt.Errorf("org doesn't intersect any polygons")
 	}
 	assert.True(mesh.IsValidPolyRef(orgRef), "%d is not a valid poly ref")
-	copy(org, nearestPt)
+	org = nearestPt
 	log.Println("org is now", org)
 
 	// get dst polygon reference
-	st, dstRef, nearestPt = query.FindNearestPoly(dst, extents, filter)
-	if detour.StatusFailed(st) {
-		return path, fmt.Errorf("FindNearestPoly failed with %v\n", st)
+	dstRef, nearestPt, err := query.FindNearestPoly(dst, extents, filter)
+	if err != nil {
+		return nil, fmt.Errorf("FindNearestPoly failed with %v\n", err)
 	} else if dstRef == 0 {
-		return path, fmt.Errorf("dst doesn't intersect any polygons")
+		return nil, fmt.Errorf("dst doesn't intersect any polygons")
 	}
 	assert.True(mesh.IsValidPolyRef(orgRef), "%d is not a valid poly ref")
-	copy(dst, nearestPt)
+	dst = nearestPt
 	log.Println("dst is now", dst)
 
 	// FindPath
-	var (
-		pathCount int
-	)
-	path = make([]detour.PolyRef, 100)
-	pathCount, st = query.FindPath(orgRef, dstRef, org[:], dst[:], filter, path)
-	if detour.StatusFailed(st) {
-		return path, fmt.Errorf("query.FindPath failed with %v\n", st)
+	path := make([]detour.PolyRef, 100)
+	path, err = query.FindPath(orgRef, dstRef, org, dst, filter, path)
+	if err != nil {
+		return path, fmt.Errorf("query.FindPath failed with %v\n", err)
 	}
-	return path[:pathCount], nil
+	return path, nil
 
 	//fmt.Println("FindPath", "org:", org, "dst:", dst, "orgRef:", orgRef, "dstRef:", dstRef)
 	//fmt.Println("FindPath set pathCount to", pathCount)

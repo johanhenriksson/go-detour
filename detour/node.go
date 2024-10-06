@@ -5,8 +5,8 @@ import (
 	"unsafe"
 
 	assert "github.com/arl/assertgo"
-	"github.com/arl/gogeo/f32/d3"
-	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func hashRef(a PolyRef) uint32 {
@@ -42,7 +42,7 @@ const (
 
 // Node represents a node in a weighted graph.
 type Node struct {
-	Pos   d3.Vec3 // Position of the node.
+	Pos   vec3.T  // Position of the node.
 	Cost  float32 // Cost from previous node to current node.
 	Total float32 // Cost up to the node.
 	//unsigned int pidx : nodeParentBits;	// Index to parent node.
@@ -58,9 +58,7 @@ type Node struct {
 }
 
 func newNode() Node {
-	return Node{
-		Pos: d3.NewVec3(),
-	}
+	return Node{}
 }
 
 const (
@@ -82,7 +80,7 @@ func newNodePool(maxNodes, hashSize int32) *NodePool {
 		maxNodes: maxNodes,
 		hashSize: hashSize,
 	}
-	assert.True(math32.NextPow2(uint32(np.hashSize)) == uint32(np.hashSize),
+	assert.True(math.NextPow2(uint(np.hashSize)) == uint(np.hashSize),
 		"m_hashSize should be a power of 2")
 
 	// pidx is special as 0 means "none" and 1 is the first node.

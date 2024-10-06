@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
 	"unsafe"
 
-	"github.com/arl/gogeo/f32"
-	"github.com/arl/gogeo/f32/d3"
-	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 // A NavMesh is a navigation mesh based on tiles of convex polygons.
@@ -49,7 +47,7 @@ import (
 // see NavMeshQuery, CreateNavMeshData, NavMeshCreateParams
 type NavMesh struct {
 	Params                NavMeshParams // Current initialization params. TODO: do not store this info twice.
-	Orig                  d3.Vec3       // Origin of the tile (0,0)
+	Orig                  vec3.T        // Origin of the tile (0,0)
 	TileWidth, TileHeight float32       // Dimensions of each tile.
 	MaxTiles              int32         // Max number of tiles.
 	TileLUTSize           int32         // Tile hash lookup size (must be pot).
@@ -85,10 +83,9 @@ func Decode(r io.Reader) (*NavMesh, error) {
 		return nil, fmt.Errorf("wrong version: %d", hdr.Version)
 	}
 
-	var mesh NavMesh
-	status := mesh.Init(&hdr.Params)
-	if StatusFailed(status) {
-		return nil, fmt.Errorf("status failed 0x%x", status)
+	mesh, err := New(&hdr.Params)
+	if err != nil {
+		return nil, err
 	}
 
 	// Read tiles.
@@ -108,19 +105,15 @@ func Decode(r io.Reader) (*NavMesh, error) {
 		}
 
 		data := make([]byte, tileHdr.DataSize)
-		if data == nil {
-			break
-		}
 		_, err = r.Read(data)
 		if err != nil {
 			return nil, err
 		}
-		status, _ := mesh.AddTile(data, tileHdr.TileRef)
-		if status&Failure != 0 {
-			return nil, fmt.Errorf("couldn't add tile %d(), status: 0x%x", i, status)
+		if _, err := mesh.AddTile(data, tileHdr.TileRef); err != nil {
+			return nil, fmt.Errorf("couldnt add tile %d(), error: %w", i, err)
 		}
 	}
-	return &mesh, nil
+	return mesh, nil
 }
 
 // SaveToFile saves the navigation mesh as a binary file.
@@ -172,7 +165,7 @@ func (m *NavMesh) SaveToFile(fn string) error {
 	return nil
 }
 
-// InitForSingleTile set up the navigation mesh for single tile use.
+// NewSingleTile creates a navigation mesh for single tile use.
 //
 //	Arguments:
 //	 data     Data of the new tile. (See: CreateNavMeshData)
@@ -182,32 +175,35 @@ func (m *NavMesh) SaveToFile(fn string) error {
 // Return The status flags for the operation.
 //
 //	see CreateNavMeshData
-func (m *NavMesh) InitForSingleTile(data []uint8, flags int) Status {
+func NewSingleTile(data []uint8, flags int) (*NavMesh, error) {
 	var header MeshHeader
 	header.unserialize(data)
 
 	// Make sure the data is in right format.
 	if header.Magic != navMeshMagic {
-		return Failure | WrongMagic
+		return nil, ErrWrongMagic
 	}
 	if header.Version != navMeshVersion {
-		return Failure | WrongVersion
+		return nil, ErrWrongVersion
 	}
 
 	var params NavMeshParams
-	copy(params.Orig[:], header.BMin[:])
-	params.TileWidth = header.BMax[0] - header.BMin[0]
-	params.TileHeight = header.BMax[2] - header.BMin[2]
+	params.Orig = header.BMin
+	params.TileWidth = header.BMax.X - header.BMin.X
+	params.TileHeight = header.BMax.Z - header.BMin.Z
 	params.MaxTiles = 1
 	params.MaxPolys = uint32(header.PolyCount)
 
-	status := m.Init(&params)
-	if StatusFailed(status) {
-		return status
+	m, err := New(&params)
+	if err != nil {
+		return nil, err
 	}
 
-	status, _ = m.AddTile(data, TileRef(flags))
-	return status
+	if _, err := m.AddTile(data, TileRef(flags)); err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }
 
 // Init initializes the navigation mesh for tiled use.
@@ -216,15 +212,17 @@ func (m *NavMesh) InitForSingleTile(data []uint8, flags int) Status {
 //	 params  Initialization parameters.
 //
 // Return the status flags for the operation.
-func (m *NavMesh) Init(params *NavMeshParams) Status {
-	m.Params = *params
-	m.Orig = d3.NewVec3From(params.Orig[0:3])
-	m.TileWidth = params.TileWidth
-	m.TileHeight = params.TileHeight
+func New(params *NavMeshParams) (*NavMesh, error) {
+	m := &NavMesh{
+		Params:     *params,
+		Orig:       params.Orig,
+		TileWidth:  params.TileWidth,
+		TileHeight: params.TileHeight,
+	}
 
 	// Init tiles
 	m.MaxTiles = int32(params.MaxTiles)
-	m.TileLUTSize = int32(math32.NextPow2(uint32(params.MaxTiles / 4)))
+	m.TileLUTSize = int32(math.NextPow2(uint(params.MaxTiles / 4)))
 	if m.TileLUTSize == 0 {
 		m.TileLUTSize = 1
 	}
@@ -240,8 +238,8 @@ func (m *NavMesh) Init(params *NavMeshParams) Status {
 	}
 
 	// Init ID generator values.
-	m.tileBits = math32.Ilog2(math32.NextPow2(uint32(params.MaxTiles)))
-	m.polyBits = math32.Ilog2(math32.NextPow2(uint32(params.MaxPolys)))
+	m.tileBits = math.Ilog2(uint32(math.NextPow2(uint(params.MaxTiles))))
+	m.polyBits = math.Ilog2(uint32(math.NextPow2(uint(params.MaxPolys))))
 	// Only allow 31 salt bits, since the salt mask is calculated using 32bit uint and it will overflow.
 	if 31 < 32-m.tileBits-m.polyBits {
 		m.saltBits = 31
@@ -251,10 +249,10 @@ func (m *NavMesh) Init(params *NavMeshParams) Status {
 
 	// if m.saltBits < 10 {
 	if m.saltBits < 8 {
-		return Status(Failure | InvalidParam)
+		return nil, ErrInvalidParam
 	}
 
-	return Success
+	return m, nil
 }
 
 // AddTile adds a tile to the navigation mesh.
@@ -282,21 +280,21 @@ func (m *NavMesh) Init(params *NavMeshParams) Status {
 // removed from this nav mesh.
 //
 // see CreateNavMeshData, removeTileBvTree
-func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
+func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (TileRef, error) {
 	var hdr MeshHeader
 	hdr.unserialize(data)
 
 	// Make sure the data is in right format.
 	if hdr.Magic != navMeshMagic {
-		return Failure | WrongMagic, 0
+		return 0, ErrWrongMagic
 	}
 	if hdr.Version != navMeshVersion {
-		return Failure | WrongVersion, 0
+		return 0, ErrWrongVersion
 	}
 
 	// Make sure the location is free.
 	if m.TileAt(hdr.X, hdr.Y, hdr.Layer) != nil {
-		return Failure, 0
+		return 0, ErrFailure
 	}
 
 	// Allocate a tile.
@@ -312,7 +310,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 		tileIndex := int32(m.decodePolyIDTile(PolyRef(lastRef)))
 		if tileIndex >= m.MaxTiles {
 			log.Fatalln("tileIndex >= m.m_maxTiles", tileIndex, m.MaxTiles)
-			return Failure | OutOfMemory, 0
+			return 0, ErrOutOfMemory
 		}
 		// Try to find the specific tile id from the free list.
 		target := &m.Tiles[tileIndex]
@@ -325,7 +323,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 		// Could not find the correct location.
 		if tile != target {
 			log.Fatalln("couldn't find the correct tile location")
-			return Failure | OutOfMemory, 0
+			return 0, ErrFailure
 		}
 		// Remove from freelist
 		if prev == nil {
@@ -341,7 +339,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 	// Make sure we could allocate a tile.
 	if tile == nil {
 		log.Fatalln("couldn't allocate tile")
-		return Failure | OutOfMemory, 0
+		return 0, ErrOutOfMemory
 	}
 
 	// Insert tile into the position lut.
@@ -409,7 +407,7 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 		}
 	}
 
-	return Success, m.TileRef(tile)
+	return m.TileRef(tile), nil
 }
 
 // Removes the specified tile from the navigation mesh.
@@ -425,18 +423,18 @@ func (m *NavMesh) AddTile(data []byte, lastRef TileRef) (Status, TileRef) {
 // it can be added back to the navigation mesh at a later point.
 //
 // see AddTile
-func (m *NavMesh) RemoveTile(ref TileRef) (data []uint8, st Status) {
+func (m *NavMesh) RemoveTile(ref TileRef) (data []uint8, err error) {
 	if ref == 0 {
-		return data, Failure | InvalidParam
+		return data, ErrInvalidParam
 	}
 	tileIndex := m.decodePolyIDTile(PolyRef(ref))
 	tileSalt := m.decodePolyIDSalt(PolyRef(ref))
 	if tileIndex >= uint32(m.MaxTiles) {
-		return data, Failure | InvalidParam
+		return data, ErrInvalidParam
 	}
 	tile := &m.Tiles[tileIndex]
 	if tile.Salt != tileSalt {
-		return data, Failure | InvalidParam
+		return data, ErrInvalidParam
 	}
 	if tile.Data != nil {
 		data = tile.Data
@@ -509,7 +507,7 @@ func (m *NavMesh) RemoveTile(ref TileRef) (data []uint8, st Status) {
 	tile.Next = m.nextFree
 	m.nextFree = tile
 
-	return data, Success
+	return data, nil
 }
 
 // TileAt returns the tile at the specified grid location.
@@ -772,26 +770,21 @@ func (m *NavMesh) baseOffMeshLinks(tile *MeshTile) {
 		con = &tile.OffMeshCons[i]
 		poly = &tile.Polys[con.Poly]
 
-		var (
-			ext []float32
-			p   []float32
-		)
-		ext = []float32{con.Rad, tile.Header.WalkableClimb, con.Rad}
+		ext := vec3.New(con.Rad, tile.Header.WalkableClimb, con.Rad)
 
 		// Find polygon to connect to.
-		p = con.Pos[0:3] // First vertex
-		nearestPt := make([]float32, 3)
-		ref := m.FindNearestPolyInTile(tile, p, ext, nearestPt)
+		p := vec3.FromSlice(con.Pos[0:3]) // First vertex
+		ref, nearestPt := m.FindNearestPolyInTile(tile, p, ext)
 		if ref == 0 {
 			continue
 		}
 		// findNearestPoly may return too optimistic results, further check to make sure.
-		if math32.Sqr(nearestPt[0]-p[0])+math32.Sqr(nearestPt[2]-p[2]) > math32.Sqr(con.Rad) {
+		if math.Pow(nearestPt.X-p.X, 2)+math.Pow(nearestPt.Z-p.Z, 2) > math.Pow(con.Rad, 2) {
 			continue
 		}
-		// Make sure the location is on current mesh.
-		var v d3.Vec3 = tile.Verts[poly.Verts[0]*3 : poly.Verts[0]*3+3]
-		v.Assign(nearestPt)
+
+		// todo: may be incorrect?
+		// nearestPt = vec3.FromSlice(tile.Verts[poly.Verts[0]*3:])
 
 		// Link off-mesh connection to target poly.
 		idx := allocLink(tile)
@@ -826,82 +819,74 @@ func (m *NavMesh) baseOffMeshLinks(tile *MeshTile) {
 }
 
 // FindNearestPolyInTile finds the nearest polygon within a tile.
-func (m *NavMesh) FindNearestPolyInTile(tile *MeshTile, center, extents, nearestPt d3.Vec3) PolyRef {
+func (m *NavMesh) FindNearestPolyInTile(tile *MeshTile, center, extents vec3.T) (nearest PolyRef, nearestPt vec3.T) {
 	bmin := center.Sub(extents)
 	bmax := center.Add(extents)
 
 	// Get nearby polygons from proximity grid.
-	var polys [128]PolyRef
-	polyCount := m.queryPolygonsInTile(tile, bmin, bmax, polys[:], 128)
+	var polyResult [128]PolyRef
+	polys := m.queryPolygonsInTile(tile, bmin, bmax, polyResult[:])
 
 	// Find nearest polygon amongst the nearby polygons.
-	var (
-		nearest            PolyRef
-		nearestDistanceSqr float32 = math.MaxFloat32
-	)
-	for i := int32(0); i < polyCount; i++ {
-		ref := polys[i]
-		var (
-			posOverPoly bool
-			d           float32
-		)
-		closestPtPoly := d3.NewVec3()
-		m.closestPointOnPoly(ref, center, closestPtPoly, &posOverPoly)
+	nearestDistanceSqr := math.MaxValue
+	for _, ref := range polys {
+		var d float32
+		closestPtPoly, posOverPoly := m.closestPointOnPoly(ref, center)
 
 		// If a point is directly over a polygon and closer than
 		// climb height, favor that instead of straight line nearest point.
 		diff := center.Sub(closestPtPoly)
 		if posOverPoly {
-			d = math32.Abs(diff[1]) - tile.Header.WalkableClimb
+			d = math.Abs(diff.Y) - tile.Header.WalkableClimb
 			if d > 0 {
 				d = d * d
 			} else {
 				d = 0
 			}
 		} else {
-			d = diff.LenSqr()
+			d = diff.LengthSqr()
 		}
 
 		if d <= nearestDistanceSqr {
-			nearestPt.Assign(closestPtPoly)
+			nearestPt = closestPtPoly
 			nearestDistanceSqr = d
 			nearest = ref
 		}
 	}
 
-	return nearest
+	return
 }
 
 // QueryPolygonsInTile queries polygons within a tile.
 func (m *NavMesh) queryPolygonsInTile(
 	tile *MeshTile,
-	qmin, qmax d3.Vec3,
+	qmin, qmax vec3.T,
 	polys []PolyRef,
-	maxPolys int32) int32 {
+) []PolyRef {
+	maxPolys := len(polys)
 
 	if tile.BvTree != nil {
 		var (
 			node            *BvNode
 			nodeIdx, endIdx int32
-			tbmin, tbmax    d3.Vec3
 			qfac            float32
 			bmin, bmax      [3]uint16
 		)
 		nodeIdx = 0
 		endIdx = tile.Header.BvNodeCount
 
-		tbmin = d3.NewVec3From(tile.Header.BMin[:])
-		tbmax = d3.NewVec3From(tile.Header.BMax[:])
+		tbmin := tile.Header.BMin
+		tbmax := tile.Header.BMax
 		qfac = tile.Header.BvQuantFactor
 
 		// Calculate quantized box
 		// clamp query box to world box.
-		minx := f32.Clamp(qmin[0], tbmin[0], tbmax[0]) - tbmin[0]
-		miny := f32.Clamp(qmin[1], tbmin[1], tbmax[1]) - tbmin[1]
-		minz := f32.Clamp(qmin[2], tbmin[2], tbmax[2]) - tbmin[2]
-		maxx := f32.Clamp(qmax[0], tbmin[0], tbmax[0]) - tbmin[0]
-		maxy := f32.Clamp(qmax[1], tbmin[1], tbmax[1]) - tbmin[1]
-		maxz := f32.Clamp(qmax[2], tbmin[2], tbmax[2]) - tbmin[2]
+		minx := math.Clamp(qmin.X, tbmin.X, tbmax.X) - tbmin.X
+		miny := math.Clamp(qmin.Y, tbmin.Y, tbmax.Y) - tbmin.Y
+		minz := math.Clamp(qmin.Z, tbmin.Z, tbmax.Z) - tbmin.Z
+		maxx := math.Clamp(qmax.X, tbmin.X, tbmax.X) - tbmin.X
+		maxy := math.Clamp(qmax.Y, tbmin.Y, tbmax.Y) - tbmin.Y
+		maxz := math.Clamp(qmax.Z, tbmin.Z, tbmax.Z) - tbmin.Z
 		// Quantize
 		bmin[0] = uint16(uint32(qfac*minx) & 0xfffe)
 		bmin[1] = uint16(uint32(qfac*miny) & 0xfffe)
@@ -912,7 +897,7 @@ func (m *NavMesh) queryPolygonsInTile(
 
 		// Traverse tree
 		base := m.polyRefBase(tile)
-		var n int32
+		var n int
 		for nodeIdx < endIdx {
 			node = &tile.BvTree[nodeIdx]
 			overlap := OverlapQuantBounds(bmin[:], bmax[:], node.BMin[:], node.BMax[:])
@@ -920,8 +905,9 @@ func (m *NavMesh) queryPolygonsInTile(
 
 			if isLeafNode && overlap {
 				if n < maxPolys {
-					n++
+					// TODO: maybe wrong order?
 					polys[n] = base | PolyRef(node.I)
+					n++
 				}
 			}
 
@@ -933,39 +919,35 @@ func (m *NavMesh) queryPolygonsInTile(
 			}
 		}
 
-		return n
-
+		return polys[:n]
 	}
 
-	var (
-		bmin, bmax [3]float32
-		n, i       int32
-	)
+	var bmin, bmax vec3.T
+	n := 0
 	base := m.polyRefBase(tile)
-	for i = 0; i < tile.Header.PolyCount; i++ {
+	for i := 0; i < int(tile.Header.PolyCount); i++ {
 		p := &tile.Polys[i]
 		// Do not return off-mesh connection polygons.
 		if p.Type() == polyTypeOffMeshConnection {
 			continue
 		}
 		// Calc polygon bounds.
-		v := tile.Verts[p.Verts[0]*3 : 3]
-		d3.Vec3(bmin[:]).Assign(v)
-		d3.Vec3(bmax[:]).Assign(v)
-		var j uint8
-		for j = 1; j < p.VertCount; j++ {
-			v = tile.Verts[p.Verts[j]*3 : 3]
-			d3.Vec3Min(bmin[:], v)
-			d3.Vec3Max(bmax[:], v)
+		v := vec3.FromSlice(tile.Verts[p.Verts[0]*3:])
+		bmin = v
+		bmax = v
+		for j := 1; j < int(p.VertCount); j++ {
+			v = vec3.FromSlice(tile.Verts[p.Verts[j]*3:])
+			bmin = vec3.Min(bmin, v)
+			bmax = vec3.Max(bmax, v)
 		}
-		if OverlapBounds(qmin, qmax, bmin[:], bmax[:]) {
+		if OverlapBounds(qmin, qmax, bmin, bmax) {
 			if n < maxPolys {
-				n++
 				polys[n] = base | PolyRef(i)
+				n++
 			}
 		}
 	}
-	return n
+	return polys[:n]
 }
 
 // decodePolyIdPoly extracts the polygon's index (within its tile) from the
@@ -984,29 +966,18 @@ func (m *NavMesh) decodePolyIDPoly(ref PolyRef) uint32 {
 //	 [in] pos          The position to check. [(x, y, z)]
 //	 [out]closest      The closest point on the polygon. [(x, y, z)]
 //	 [out]posOverPoly  True of the position is over the polygon.
-func (m *NavMesh) closestPointOnPoly(ref PolyRef, pos, closest d3.Vec3, posOverPoly *bool) {
-	var (
-		tile *MeshTile
-		poly *Poly
-	)
-
-	m.TileAndPolyByRefUnsafe(ref, &tile, &poly)
+func (m *NavMesh) closestPointOnPoly(ref PolyRef, pos vec3.T) (closest vec3.T, posOverPoly bool) {
+	tile, poly := m.TileAndPolyByRefUnsafe(ref)
 
 	// Off-mesh connections don't have detail polygons.
 	if poly.Type() == polyTypeOffMeshConnection {
-		var (
-			v0, v1    d3.Vec3
-			d0, d1, u float32
-		)
-		v0 = tile.Verts[poly.Verts[0]*3 : 3]
-		v1 = tile.Verts[poly.Verts[1]*3 : 3]
-		d0 = pos.Dist(v0)
-		d1 = pos.Dist(v1)
-		u = d0 / (d0 + d1)
-		closest = v0.Lerp(v1, u)
-		if posOverPoly != nil {
-			*posOverPoly = false
-		}
+		v0 := vec3.FromSlice(tile.Verts[poly.Verts[0]*3:])
+		v1 := vec3.FromSlice(tile.Verts[poly.Verts[1]*3:])
+		d0 := vec3.Distance(pos, v0)
+		d1 := vec3.Distance(pos, v1)
+		u := d0 / (d0 + d1)
+		closest = vec3.Lerp(v0, v1, u)
+		posOverPoly = false
 		return
 	}
 
@@ -1014,40 +985,33 @@ func (m *NavMesh) closestPointOnPoly(ref PolyRef, pos, closest d3.Vec3, posOverP
 	pd := &tile.DetailMeshes[uint32(ip)]
 
 	// Clamp point to be inside the polygon.
-	verts := make([]float32, VertsPerPolygon*3)
-	edged := make([]float32, VertsPerPolygon)
-	edget := make([]float32, VertsPerPolygon)
+	verts := [VertsPerPolygon]vec3.T{}
+	edged := [VertsPerPolygon]float32{}
+	edget := [VertsPerPolygon]float32{}
 	nv := poly.VertCount
-	var i uint8
-	for i = 0; i < nv; i++ {
-		idx := i * 3
+	for i := 0; i < int(nv); i++ {
 		jdx := poly.Verts[i] * 3
-		copy(verts[idx:], tile.Verts[jdx:jdx+3])
+		verts[i] = vec3.FromSlice(tile.Verts[jdx:])
 	}
 
-	closest.Assign(pos)
-	if !distancePtPolyEdgesSqr(pos, verts, int32(nv), edged, edget) {
+	closest = pos
+	if !distancePtPolyEdgesSqr(pos, verts[:nv], edged[:nv], edget[:nv]) {
 		// Point is outside the polygon, clamp to nearest edge.
 		dmin := edged[0]
 		var imin uint8
-		for i = 1; i < nv; i++ {
+		for i := 1; i < int(nv); i++ {
 			if edged[i] < dmin {
 				dmin = edged[i]
-				imin = i
+				imin = uint8(i)
 			}
 		}
-		va := d3.NewVec3From(verts[imin*3 : imin*3+3])
-		vidx := ((imin + 1) % nv) * 3
-		vb := d3.NewVec3From(verts[vidx : vidx+3])
-		closest = va.Lerp(vb, edget[imin])
+		va := verts[imin]
+		vb := verts[(imin+1)%nv]
+		closest = vec3.Lerp(va, vb, edget[imin])
 
-		if posOverPoly != nil {
-			*posOverPoly = false
-		}
+		posOverPoly = false
 	} else {
-		if posOverPoly != nil {
-			*posOverPoly = true
-		}
+		posOverPoly = true
 	}
 
 	// Find height at the location.
@@ -1056,24 +1020,24 @@ func (m *NavMesh) closestPointOnPoly(ref PolyRef, pos, closest d3.Vec3, posOverP
 		vidx := (pd.TriBase + uint32(j)) * 4
 		t := tile.DetailTris[vidx : vidx+3]
 		var (
-			v [3]d3.Vec3
+			v [3]vec3.T
 			k int
 		)
 		for k = 0; k < 3; k++ {
 			if t[k] < poly.VertCount {
 				vidx := poly.Verts[t[k]] * 3
-				v[k] = tile.Verts[vidx : vidx+3]
+				v[k] = vec3.FromSlice(tile.Verts[vidx:])
 			} else {
 				vidx := (pd.VertBase + uint32(t[k]-poly.VertCount)) * 3
-				v[k] = tile.DetailVerts[vidx : vidx+3]
+				v[k] = vec3.FromSlice(tile.DetailVerts[vidx:])
 			}
 		}
-		var h float32
-		if closestHeightPointTriangle(closest, v[0], v[1], v[2], &h) {
-			closest[1] = h
+		if h, ok := closestHeightPointTriangle(closest, v[0], v[1], v[2]); ok {
+			closest.Y = h
 			break
 		}
 	}
+	return
 }
 
 // TileAndPolyByRefUnsafe returns the tile and polygon for the specified polygon
@@ -1082,12 +1046,12 @@ func (m *NavMesh) closestPointOnPoly(ref PolyRef, pos, closest d3.Vec3, posOverP
 // Warning: only use this function if it is known that the provided polygon
 // reference is valid. This function is faster than TileAndPolyByRef, but it
 // does not validate the reference.
-// TODO: Use Go-idioms: change signature and returns tile and poly
-func (m *NavMesh) TileAndPolyByRefUnsafe(ref PolyRef, tile **MeshTile, poly **Poly) {
+func (m *NavMesh) TileAndPolyByRefUnsafe(ref PolyRef) (tile *MeshTile, poly *Poly) {
 	var salt, it, ip uint32
 	m.DecodePolyID(ref, &salt, &it, &ip)
-	*tile = &m.Tiles[it]
-	*poly = &m.Tiles[it].Polys[ip]
+	tile = &m.Tiles[it]
+	poly = &m.Tiles[it].Polys[ip]
+	return
 }
 
 // DecodePolyID decodes a standard polygon reference.
@@ -1138,24 +1102,26 @@ func (m *NavMesh) connectExtOffMeshLinks(tile, target *MeshTile, side int32) {
 			continue
 		}
 
-		ext := []float32{targetCon.Rad, target.Header.WalkableClimb, targetCon.Rad}
+		ext := vec3.New(targetCon.Rad, target.Header.WalkableClimb, targetCon.Rad)
 
 		// Find polygon to connect to.
-		p := targetCon.Pos[3:6]
-		nearestPt := d3.NewVec3()
-		ref := m.FindNearestPolyInTile(tile, p, ext, nearestPt)
+		p := vec3.FromSlice(targetCon.Pos[3:6])
+		ref, nearestPt := m.FindNearestPolyInTile(tile, p, ext)
 		if ref == 0 {
 			continue
 		}
 
 		// findNearestPoly may return too optimistic results, further check to make sure.
-		if math32.Sqr(nearestPt[0]-p[0])+math32.Sqr(nearestPt[2]-p[2]) > math32.Sqr(targetCon.Rad) {
+		if math.Pow(nearestPt.X-p.X, 2)+math.Pow(nearestPt.Z-p.Z, 2) > math.Pow(targetCon.Rad, 2) {
 			continue
 		}
 
-		// Make sure the location is on current mesh.
-		var v d3.Vec3 = target.Verts[targetPoly.Verts[1]*3:]
-		v.Assign(nearestPt)
+		// old code:
+		// var v d3.Vec3 = target.Verts[targetPoly.Verts[1]*3:]
+		// v.Assign(nearestPt)
+		// this seems to mutate the target.Verts array?
+		// todo: may be incorrect?
+		// nearestPt = vec3.FromSlice(target.Verts[targetPoly.Verts[1]*3:])
 
 		// Link off-mesh connection to target poly.
 		idx := allocLink(target)
@@ -1251,11 +1217,11 @@ func (m *NavMesh) connectExtLinks(tile, target *MeshTile, side int32) {
 			}
 
 			// Create new links
-			va := tile.Verts[poly.Verts[j]*3:]
-			vb := tile.Verts[poly.Verts[(j+1)%int32(nv)]*3:]
-			nei := make([]PolyRef, 4)
-			neia := make([]float32, 4*2)
-			nnei := m.findConnectingPolys(va, vb, target, oppositeTile(dir), nei, neia, 4)
+			va := vec3.FromSlice(tile.Verts[poly.Verts[j]*3:])
+			vb := vec3.FromSlice(tile.Verts[poly.Verts[(j+1)%int32(nv)]*3:])
+			nei := [4]PolyRef{}
+			neia := [4 * 2]float32{}
+			nnei := m.findConnectingPolys(va, vb, target, oppositeTile(dir), nei[:], neia[:], 4)
 
 			var k int32
 			for k = 0; k < nnei; k++ {
@@ -1271,21 +1237,21 @@ func (m *NavMesh) connectExtLinks(tile, target *MeshTile, side int32) {
 
 					// Compress portal limits to a byte value.
 					if dir == 0 || dir == 4 {
-						tmin := (neia[k*2+0] - va[2]) / (vb[2] - va[2])
-						tmax := (neia[k*2+1] - va[2]) / (vb[2] - va[2])
+						tmin := (neia[k*2+0] - va.Z) / (vb.Z - va.Z)
+						tmax := (neia[k*2+1] - va.Z) / (vb.Z - va.Z)
 						if tmin > tmax {
 							tmin, tmax = tmax, tmin
 						}
-						link.BMin = uint8(f32.Clamp(tmin, 0.0, 1.0) * 255.0)
-						link.BMax = uint8(f32.Clamp(tmax, 0.0, 1.0) * 255.0)
+						link.BMin = uint8(math.Clamp(tmin, 0.0, 1.0) * 255.0)
+						link.BMax = uint8(math.Clamp(tmax, 0.0, 1.0) * 255.0)
 					} else if dir == 2 || dir == 6 {
-						tmin := (neia[k*2+0] - va[0]) / (vb[0] - va[0])
-						tmax := (neia[k*2+1] - va[0]) / (vb[0] - va[0])
+						tmin := (neia[k*2+0] - va.X) / (vb.X - va.X)
+						tmax := (neia[k*2+1] - va.X) / (vb.X - va.X)
 						if tmin > tmax {
 							tmin, tmax = tmax, tmin
 						}
-						link.BMin = uint8(f32.Clamp(tmin, 0.0, 1.0) * 255.0)
-						link.BMax = uint8(f32.Clamp(tmax, 0.0, 1.0) * 255.0)
+						link.BMin = uint8(math.Clamp(tmin, 0.0, 1.0) * 255.0)
+						link.BMax = uint8(math.Clamp(tmax, 0.0, 1.0) * 255.0)
 					}
 				}
 			}
@@ -1296,7 +1262,7 @@ func (m *NavMesh) connectExtLinks(tile, target *MeshTile, side int32) {
 // Returns all polygons in neighbour tile based
 // on portal defined by the segment.
 func (m *NavMesh) findConnectingPolys(
-	va, vb []float32,
+	va, vb vec3.T,
 	tile *MeshTile,
 	side int32,
 	con []PolyRef,
@@ -1307,14 +1273,10 @@ func (m *NavMesh) findConnectingPolys(
 		return 0
 	}
 
-	amin := make([]float32, 2)
-	amax := make([]float32, 2)
-	calcSlabEndPoints(va, vb, amin, amax, side)
+	amin, amax := calcSlabEndPoints(va, vb, side)
 	apos := slabCoord(va, side)
 
 	// Remove links pointing to 'side' and compact the links array.
-	bmin := make([]float32, 2)
-	bmax := make([]float32, 2)
 	l := extLink | uint16(side)
 	var n int32
 
@@ -1332,18 +1294,18 @@ func (m *NavMesh) findConnectingPolys(
 			}
 
 			idx := poly.Verts[j] * 3
-			vc := tile.Verts[idx : idx+3]
+			vc := vec3.FromSlice(tile.Verts[idx:])
 			idx = poly.Verts[(j+1)%nv] * 3
-			vd := tile.Verts[idx : idx+3]
+			vd := vec3.FromSlice(tile.Verts[idx:])
 			bpos := slabCoord(vc, side)
 
 			// Segments are not close enough.
-			if math32.Abs(apos-bpos) > 0.01 {
+			if math.Abs(apos-bpos) > 0.01 {
 				continue
 			}
 
 			// Check if the segments touch.
-			calcSlabEndPoints(vc, vd, bmin, bmax, side)
+			bmin, bmax := calcSlabEndPoints(vc, vd, side)
 
 			if !overlapSlabs(amin, amax, bmin, bmax, 0.01, tile.Header.WalkableClimb) {
 				continue
@@ -1351,8 +1313,8 @@ func (m *NavMesh) findConnectingPolys(
 
 			// Add return value.
 			if n < maxcon {
-				conarea[n*2+0] = math32.Max(amin[0], bmin[0])
-				conarea[n*2+1] = math32.Min(amax[0], bmax[0])
+				conarea[n*2+0] = math.Max(amin.X, bmin.X)
+				conarea[n*2+1] = math.Min(amax.X, bmax.X)
 				con[n] = base | PolyRef(i)
 				n++
 			}
@@ -1393,58 +1355,59 @@ func (m *NavMesh) unconnectLinks(tile *MeshTile, target *MeshTile) {
 	}
 }
 
-func calcSlabEndPoints(va, vb d3.Vec3, bmin, bmax []float32, side int32) {
+func calcSlabEndPoints(va, vb vec3.T, side int32) (bmin, bmax vec3.T) {
 	if side == 0 || side == 4 {
-		if va[2] < vb[2] {
-			bmin[0] = va[2]
-			bmin[1] = va[1]
-			bmax[0] = vb[2]
-			bmax[1] = vb[1]
+		if va.Z < vb.Z {
+			bmin.X = va.Z
+			bmin.Y = va.Y
+			bmax.X = vb.Z
+			bmax.Y = vb.Y
 		} else {
-			bmin[0] = vb[2]
-			bmin[1] = vb[1]
-			bmax[0] = va[2]
-			bmax[1] = va[1]
+			bmin.X = vb.Z
+			bmin.Y = vb.Y
+			bmax.X = va.Z
+			bmax.Y = va.Y
 		}
 	} else if side == 2 || side == 6 {
-		if va[0] < vb[0] {
-			bmin[0] = va[0]
-			bmin[1] = va[1]
-			bmax[0] = vb[0]
-			bmax[1] = vb[1]
+		if va.X < vb.X {
+			bmin.X = va.X
+			bmin.Y = va.Y
+			bmax.X = vb.X
+			bmax.Y = vb.Y
 		} else {
-			bmin[0] = vb[0]
-			bmin[1] = vb[1]
-			bmax[0] = va[0]
-			bmax[1] = va[1]
+			bmin.X = vb.X
+			bmin.Y = vb.Y
+			bmax.X = va.X
+			bmax.Y = va.Y
 		}
 	}
+	return
 }
 
-func slabCoord(va d3.Vec3, side int32) float32 {
+func slabCoord(va vec3.T, side int32) float32 {
 	if side == 0 || side == 4 {
-		return va[0]
+		return va.X
 	} else if side == 2 || side == 6 {
-		return va[2]
+		return va.Z
 	}
 	return 0
 }
 
-func overlapSlabs(amin, amax, bmin, bmax d3.Vec3, px, py float32) bool {
+func overlapSlabs(amin, amax, bmin, bmax vec3.T, px, py float32) bool {
 	// Check for horizontal overlap.
 	// The segment is shrunken a little so that slabs which touch
 	// at end points are not connected.
-	minx := math32.Max(amin[0]+px, bmin[0]+px)
-	maxx := math32.Min(amax[0]-px, bmax[0]-px)
+	minx := math.Max(amin.X+px, bmin.X+px)
+	maxx := math.Min(amax.X-px, bmax.X-px)
 	if minx > maxx {
 		return false
 	}
 
 	// Check vertical overlap.
-	ad := (amax[1] - amin[1]) / (amax[0] - amin[0])
-	ak := amin[1] - ad*amin[0]
-	bd := (bmax[1] - bmin[1]) / (bmax[0] - bmin[0])
-	bk := bmin[1] - bd*bmin[0]
+	ad := (amax.Y - amin.Y) / (amax.X - amin.X)
+	ak := amin.Y - ad*amin.X
+	bd := (bmax.Y - bmin.Y) / (bmax.X - bmin.X)
+	bk := bmin.Y - bd*bmin.X
 	aminy := ad*minx + ak
 	amaxy := ad*maxx + ak
 	bminy := bd*minx + bk
@@ -1458,7 +1421,7 @@ func overlapSlabs(amin, amax, bmin, bmax d3.Vec3, px, py float32) bool {
 	}
 
 	// Check for overlap at endpoints.
-	thr := math32.Sqr(py * 2)
+	thr := math.Pow(py*2, 2)
 	if dmin*dmin <= thr || dmax*dmax <= thr {
 		return true
 	}
@@ -1594,24 +1557,24 @@ func (m *NavMesh) IsValidPolyRef(ref PolyRef) bool {
 //	 [out]poly    The polygon.
 //
 // TODO: Use Go-idioms: change signature and returns tile and poly
-func (m *NavMesh) TileAndPolyByRef(ref PolyRef, tile **MeshTile, poly **Poly) Status {
+func (m *NavMesh) TileAndPolyByRef(ref PolyRef) (*MeshTile, *Poly, error) {
 	if ref == 0 {
-		return Failure
+		return nil, nil, ErrFailure
 	}
 	var salt, it, ip uint32
 	m.DecodePolyID(ref, &salt, &it, &ip)
 	if it >= uint32(m.MaxTiles) {
-		return Failure | InvalidParam
+		return nil, nil, ErrInvalidParam
 	}
 	if m.Tiles[it].Salt != salt || m.Tiles[it].Header == nil {
-		return Failure | InvalidParam
+		return nil, nil, ErrInvalidParam
 	}
 	if ip >= uint32(m.Tiles[it].Header.PolyCount) {
-		return Failure | InvalidParam
+		return nil, nil, ErrInvalidParam
 	}
-	*tile = &m.Tiles[it]
-	*poly = &m.Tiles[it].Polys[ip]
-	return Success
+	tile := &m.Tiles[it]
+	poly := &m.Tiles[it].Polys[ip]
+	return tile, poly, nil
 }
 
 // CalcTileLoc calculates the tile grid location for the specified world
@@ -1621,8 +1584,8 @@ func (m *NavMesh) TileAndPolyByRef(ref PolyRef, tile **MeshTile, poly **Poly) St
 //	 [in] pos  The world position for the query. [(x, y, z)]
 //	 [out]tx   The tile's x-location. (x, y)
 //	 [out]ty   The tile's y-location. (x, y)
-func (m *NavMesh) CalcTileLoc(pos d3.Vec3) (tx, ty int32) {
-	tx = int32(math32.Floor((pos[0] - m.Orig[0]) / m.TileWidth))
-	ty = int32(math32.Floor((pos[2] - m.Orig[2]) / m.TileHeight))
+func (m *NavMesh) CalcTileLoc(pos vec3.T) (tx, ty int32) {
+	tx = int32(math.Floor((pos.X - m.Orig.X) / m.TileWidth))
+	ty = int32(math.Floor((pos.Z - m.Orig.Z) / m.TileHeight))
 	return tx, ty
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/arl/go-detour/recast"
 	"github.com/arl/go-detour/sample"
 	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 // SoloMesh allows building of single tile navigation meshes.
@@ -39,7 +40,16 @@ func (sm *SoloMesh) SetSettings(s recast.BuildSettings) {
 // LoadGeometry loads geometry from r that reads from a geometry definition
 // file.
 func (sm *SoloMesh) LoadGeometry(r io.Reader) error {
-	return sm.geom.LoadOBJMesh(r)
+	mesh, err := recast.NewMeshLoaderOBJ(r)
+	if err != nil {
+		return err
+	}
+	geom, err := recast.NewInputGeom(mesh.Verts(), mesh.Tris())
+	if err != nil {
+		return err
+	}
+	sm.geom = *geom
+	return nil
 }
 
 // InputGeom returns the nav mesh input geometry.
@@ -50,17 +60,12 @@ func (sm *SoloMesh) InputGeom() *recast.InputGeom {
 // Build builds the navigation mesh for the input geometry provided
 // TODO: should return an error instead of bool
 func (sm *SoloMesh) Build() (*detour.NavMesh, bool) {
-	if sm.geom.Mesh() == nil {
-		// TODO: error "no vertices and triangles"
-		return nil, false
-	}
-
 	bmin := sm.geom.NavMeshBoundsMin()
 	bmax := sm.geom.NavMeshBoundsMax()
-	verts := sm.geom.Mesh().Verts()
-	nverts := sm.geom.Mesh().VertCount()
-	tris := sm.geom.Mesh().Tris()
-	ntris := sm.geom.Mesh().TriCount()
+	verts := sm.geom.Verts()
+	nverts := sm.geom.NumVerts()
+	tris := sm.geom.Tris()
+	ntris := sm.geom.NumTris()
 
 	//
 	// Step 1. Initialize build config.
@@ -342,8 +347,8 @@ func (sm *SoloMesh) Build() (*detour.NavMesh, bool) {
 	params.WalkableHeight = agentHeight
 	params.WalkableRadius = agentRadius
 	params.WalkableClimb = agentMaxClimb
-	copy(params.BMin[:], pmesh.BMin[:])
-	copy(params.BMax[:], pmesh.BMax[:])
+	params.BMin = vec3.FromSlice(pmesh.BMin[:])
+	params.BMax = vec3.FromSlice(pmesh.BMax[:])
 	params.Cs = sm.cfg.Cs
 	params.Ch = sm.cfg.Ch
 	params.BuildBvTree = true
@@ -353,19 +358,14 @@ func (sm *SoloMesh) Build() (*detour.NavMesh, bool) {
 		return nil, false
 	}
 
-	var (
-		navMesh detour.NavMesh
-		// navQuery *detour.NavMeshQuery
-		status detour.Status
-	)
-	status = navMesh.InitForSingleTile(navData, 0)
-	if detour.StatusFailed(status) {
+	navMesh, err := detour.NewSingleTile(navData, 0)
+	if err != nil {
 		sm.ctx.Errorf("Could not init Detour navmesh")
 		return nil, false
 	}
 
-	status, _ = detour.NewNavMeshQuery(&navMesh, 2048)
-	if detour.StatusFailed(status) {
+	_, err = detour.NewNavMeshQuery(navMesh, 2048)
+	if err != nil {
 		sm.ctx.Errorf("Could not init Detour navmesh query")
 		return nil, false
 	}
@@ -375,5 +375,5 @@ func (sm *SoloMesh) Build() (*detour.NavMesh, bool) {
 	recast.LogBuildTimes(sm.ctx, sm.ctx.AccumulatedTime(recast.TimerTotal))
 	sm.ctx.Progressf(">> Polymesh: %d vertices  %d polygons", pmesh.NVerts, pmesh.NPolys)
 
-	return &navMesh, true
+	return navMesh, true
 }

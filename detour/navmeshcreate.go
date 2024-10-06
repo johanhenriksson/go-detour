@@ -2,13 +2,11 @@ package detour
 
 import (
 	"fmt"
-	"math"
 	"sort"
 	"unsafe"
 
-	"github.com/arl/gogeo/f32"
-	"github.com/arl/gogeo/f32/d3"
-	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 type bvItem struct {
@@ -266,28 +264,27 @@ func createBVTree(params *NavMeshCreateParams, nodes []BvNode) int32 {
 		it.i = i
 		// Calc polygon bounds. Use detail meshes if available.
 		if len(params.DetailMeshes) > 0 {
-
-			vb := int32(params.DetailMeshes[i*4+0])
-			ndv := int32(params.DetailMeshes[i*4+1])
-			var bmin, bmax [3]float32
+			vb := int(params.DetailMeshes[i*4+0])
+			ndv := int(params.DetailMeshes[i*4+1])
 
 			dv := params.DetailVerts[vb*3:]
-			copy(bmin[:], dv[:3])
-			copy(bmax[:], dv[:3])
+			bmin := vec3.FromSlice(dv)
+			bmax := vec3.FromSlice(dv)
 
-			for j := int32(1); j < ndv; j++ {
-				d3.Vec3Min(bmin[:], dv[j*3:])
-				d3.Vec3Max(bmax[:], dv[j*3:])
+			for j := 1; j < ndv; j++ {
+				vj := vec3.FromSlice(dv[j*3:])
+				bmin = vec3.Min(bmin, vj)
+				bmax = vec3.Max(bmax, vj)
 			}
 
 			// BV-tree uses cs for all dimensions
-			it.BMin[0] = uint16(int32Clamp(int32((bmin[0]-params.BMin[0])*quantFactor), 0, 0xffff))
-			it.BMin[1] = uint16(int32Clamp(int32((bmin[1]-params.BMin[1])*quantFactor), 0, 0xffff))
-			it.BMin[2] = uint16(int32Clamp(int32((bmin[2]-params.BMin[2])*quantFactor), 0, 0xffff))
+			it.BMin[0] = uint16(int32Clamp(int32((bmin.X-params.BMin.X)*quantFactor), 0, 0xffff))
+			it.BMin[1] = uint16(int32Clamp(int32((bmin.Y-params.BMin.Y)*quantFactor), 0, 0xffff))
+			it.BMin[2] = uint16(int32Clamp(int32((bmin.Z-params.BMin.Z)*quantFactor), 0, 0xffff))
 
-			it.BMax[0] = uint16(int32Clamp(int32((bmax[0]-params.BMin[0])*quantFactor), 0, 0xffff))
-			it.BMax[1] = uint16(int32Clamp(int32((bmax[1]-params.BMin[1])*quantFactor), 0, 0xffff))
-			it.BMax[2] = uint16(int32Clamp(int32((bmax[2]-params.BMin[2])*quantFactor), 0, 0xffff))
+			it.BMax[0] = uint16(int32Clamp(int32((bmax.X-params.BMin.X)*quantFactor), 0, 0xffff))
+			it.BMax[1] = uint16(int32Clamp(int32((bmax.Y-params.BMin.Y)*quantFactor), 0, 0xffff))
+			it.BMax[2] = uint16(int32Clamp(int32((bmax.Z-params.BMin.Z)*quantFactor), 0, 0xffff))
 		} else {
 			panic("UNTESTED")
 			p := params.Polys[i*params.Nvp*2:]
@@ -328,8 +325,8 @@ func createBVTree(params *NavMeshCreateParams, nodes []BvNode) int32 {
 				}
 			}
 			// Remap y
-			it.BMin[1] = uint16(math32.Floor(float32(it.BMin[1]) * params.Ch / params.Cs))
-			it.BMax[1] = uint16(math32.Ceil(float32(it.BMax[1]) * params.Ch / params.Cs))
+			it.BMin[1] = uint16(math.Floor(float32(it.BMin[1]) * params.Ch / params.Cs))
+			it.BMax[1] = uint16(math.Ceil(float32(it.BMax[1]) * params.Ch / params.Cs))
 		}
 	}
 
@@ -338,7 +335,7 @@ func createBVTree(params *NavMeshCreateParams, nodes []BvNode) int32 {
 	return curNode
 }
 
-func classifyOffMeshPoint(pt, bmin, bmax d3.Vec3) uint8 {
+func classifyOffMeshPoint(pt, bmin, bmax vec3.T) uint8 {
 	const (
 		XP uint8 = 1 << 0
 		ZP       = 1 << 1
@@ -348,17 +345,17 @@ func classifyOffMeshPoint(pt, bmin, bmax d3.Vec3) uint8 {
 
 	var outcode uint8
 
-	if pt[0] >= bmax[0] {
+	if pt.X >= bmax.X {
 		outcode |= XP
 	}
 
-	if pt[2] >= bmax[2] {
+	if pt.Z >= bmax.Z {
 		outcode |= ZP
 	}
-	if pt[0] < bmin[0] {
+	if pt.X < bmin.X {
 		outcode |= XM
 	}
-	if pt[2] < bmin[2] {
+	if pt.Z < bmin.Z {
 		outcode |= ZM
 	}
 
@@ -508,10 +505,10 @@ type NavMeshCreateParams struct {
 	TileLayer int32
 
 	// The minimum bounds of the tile. [(x, y, z)] [Unit: wu]
-	BMin [3]float32
+	BMin vec3.T
 
 	// The maximum bounds of the tile. [(x, y, z)] [Unit: wu]
-	BMax [3]float32
+	BMax vec3.T
 
 	//
 	// General Configuration Attributes
@@ -572,40 +569,38 @@ func CreateNavMeshData(params *NavMeshCreateParams) ([]uint8, error) {
 		offMeshConClass = make([]uint8, params.OffMeshConCount*2)
 
 		// Find tight heigh bounds, used for culling out off-mesh start locations.
-		hmin := float32(math.MaxFloat32)
-		hmax := float32(-math.MaxFloat32)
+		hmin := math.MaxValue
+		hmax := -math.MaxValue
 
 		if params.DetailVerts != nil && params.DetailVertsCount != 0 {
 			for i := int32(0); i < params.DetailVertsCount; i++ {
 				h := params.DetailVerts[i*3+1]
-				f32.SetMin(&hmin, h)
-				f32.SetMax(&hmax, h)
+				hmin = math.Min(hmin, h)
+				hmax = math.Max(hmax, h)
 			}
 		} else {
 			for i := int32(0); i < params.VertCount; i++ {
 				iv := params.Verts[i*3:]
-				h := params.BMin[1] + float32(iv[1])*params.Ch
-				f32.SetMin(&hmin, h)
-				f32.SetMax(&hmax, h)
+				h := params.BMin.Y + float32(iv[1])*params.Ch
+				hmin = math.Min(hmin, h)
+				hmax = math.Max(hmax, h)
 			}
 		}
 		hmin -= params.WalkableClimb
 		hmax += params.WalkableClimb
-		var bmin, bmax [3]float32
-		copy(bmin[:], params.BMin[:])
-		copy(bmax[:], params.BMax[:])
-		bmin[1] = hmin
-		bmax[1] = hmax
+		var bmin, bmax = params.BMin, params.BMax
+		bmin.Y = hmin
+		bmax.Y = hmax
 
 		for i := int32(0); i < params.OffMeshConCount; i++ {
-			p0 := params.OffMeshConVerts[(i*2+0)*3:]
-			p1 := params.OffMeshConVerts[(i*2+1)*3:]
-			offMeshConClass[i*2+0] = classifyOffMeshPoint(p0, bmin[:], bmax[:])
-			offMeshConClass[i*2+1] = classifyOffMeshPoint(p1, bmin[:], bmax[:])
+			p0 := vec3.FromSlice(params.OffMeshConVerts[(i*2+0)*3:])
+			p1 := vec3.FromSlice(params.OffMeshConVerts[(i*2+1)*3:])
+			offMeshConClass[i*2+0] = classifyOffMeshPoint(p0, bmin, bmax)
+			offMeshConClass[i*2+1] = classifyOffMeshPoint(p1, bmin, bmax)
 
 			// Zero out off-mesh start positions which are not even potentially touching the mesh.
 			if offMeshConClass[i*2+0] == 0xff {
-				if p0[1] < bmin[1] || p0[1] > bmax[1] {
+				if p0.Y < bmin.Y || p0.Y > bmax.Y {
 					offMeshConClass[i*2+0] = 0
 				}
 			}
@@ -732,8 +727,8 @@ func CreateNavMeshData(params *NavMeshCreateParams) ([]uint8, error) {
 	hdr.PolyCount = int32(totPolyCount)
 	hdr.VertCount = int32(totVertCount)
 	hdr.MaxLinkCount = maxLinkCount
-	copy(hdr.BMin[:], params.BMin[:])
-	copy(hdr.BMax[:], params.BMax[:])
+	hdr.BMin = params.BMin
+	hdr.BMax = params.BMax
 	hdr.DetailMeshCount = params.PolyCount
 	hdr.DetailVertCount = uniqueDetailVertCount
 	hdr.DetailTriCount = detailTriCount
@@ -756,9 +751,9 @@ func CreateNavMeshData(params *NavMeshCreateParams) ([]uint8, error) {
 	for i := int32(0); i < params.VertCount; i++ {
 		iv := params.Verts[i*3 : i*3+3]
 		v := navVerts[i*3 : i*3+3]
-		v[0] = params.BMin[0] + float32(iv[0])*params.Cs
-		v[1] = params.BMin[1] + float32(iv[1])*params.Ch
-		v[2] = params.BMin[2] + float32(iv[2])*params.Cs
+		v[0] = params.BMin.X + float32(iv[0])*params.Cs
+		v[1] = params.BMin.Y + float32(iv[1])*params.Ch
+		v[2] = params.BMin.Z + float32(iv[2])*params.Cs
 	}
 	// Off-mesh link vertices.
 	var n int32

@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func TestOffMeshConnections(t *testing.T) {
@@ -17,10 +17,10 @@ func TestOffMeshConnections(t *testing.T) {
 	)
 
 	pathTests := []struct {
-		org, dst           d3.Vec3
+		org, dst           vec3.T
 		incFlags, excFlags uint16 // query filter include/exclude flags
 		wantPath           []PolyRef
-		wantStraightPath   []d3.Vec3
+		wantStraightPath   []vec3.T
 	}{
 		{
 			// latest result:
@@ -50,19 +50,18 @@ func TestOffMeshConnections(t *testing.T) {
 			//d3.Vec3{20.308548, 11.554298, -57.635326},
 			//d3.Vec3{-17.323172, 3.074387, -3.366402},
 			//d3.Vec3{-4.377790, -0.000053, -1.633406},
-			d3.Vec3{-19.460140, 4.234787, -4.727699},
-			d3.Vec3{-1.402759, -0.000092, -2.314920},
+			vec3.New(-19.460140, 4.234787, -4.727699),
+			vec3.New(-1.402759, -0.000092, -2.314920),
 
 			0xffef, // all poly but the disabled ones
 			0x0,
 			//[]PolyRef{0x600029, 0x600023, 0x600025, 0x60001d, 0x60001c, 0x60001e, 0x600020, 0x60001f, 0x600016, 0x600012, 0x60000b, 0x600018, 0x600015, 0x600006, 0x600005, 0x600007, 0x600008, 0x600034},
 			[]PolyRef{0x600029, 0x60003d, 0x600034},
-			[]d3.Vec3{
-
-				d3.NewVec3XYZ(-19.460140, 4.234787, -4.727699),
-				d3.NewVec3XYZ(-17.767578, 2.514686, -0.300116),
-				d3.NewVec3XYZ(-6.194458, 0.197294, 1.019781),
-				d3.NewVec3XYZ(-1.402759, -0.000092, -2.314920),
+			[]vec3.T{
+				vec3.New(-19.460140, 4.234787, -4.727699),
+				vec3.New(-17.767578, 2.514686, -0.300116),
+				vec3.New(-6.194458, 0.197294, 1.019781),
+				vec3.New(-1.402759, -0.000092, -2.314920),
 			},
 
 			/*         []d3.Vec3{*/
@@ -82,24 +81,15 @@ func TestOffMeshConnections(t *testing.T) {
 	checkt(t, err)
 
 	for _, tt := range pathTests {
-		var (
-			query          *NavMeshQuery        // the query instance
-			filter         *StandardQueryFilter // the query filter
-			orgRef, dstRef PolyRef              // find poly query results
-			org, dst       d3.Vec3              // find poly query results
-			st             Status               // status flags
-			path           []PolyRef            // returned path
-		)
-
-		st, query = NewNavMeshQuery(mesh, 1000)
-		if StatusFailed(st) {
-			t.Error("query creation failed:", st)
+		query, err := NewNavMeshQuery(mesh, 1000)
+		if err != nil {
+			t.Error("query creation failed:", err)
 		}
 		// define the extents vector for the nearest polygon query
-		extents := d3.NewVec3XYZ(2, 2, 2)
+		extents := vec3.New(2, 2, 2)
 
 		// create a default query filter
-		filter = NewStandardQueryFilter()
+		filter := NewStandardQueryFilter()
 		filter.SetIncludeFlags(tt.incFlags)
 		filter.SetExcludeFlags(tt.excFlags)
 
@@ -132,9 +122,9 @@ func TestOffMeshConnections(t *testing.T) {
 		filter.SetAreaCost(samplePolyAreaJump, 1.5)
 
 		// get org polygon reference
-		st, orgRef, org = query.FindNearestPoly(tt.org, extents, filter)
-		if StatusFailed(st) {
-			t.Fatal("couldn't find nearest poly of", tt.org, ":", st)
+		orgRef, org, err := query.FindNearestPoly(tt.org, extents, filter)
+		if err != nil {
+			t.Fatal("couldn't find nearest poly of", tt.org, ":", err)
 		}
 		if !mesh.IsValidPolyRef(orgRef) {
 			t.Fatal("orgRef", orgRef, "is not a valid poly ref")
@@ -143,9 +133,9 @@ func TestOffMeshConnections(t *testing.T) {
 		t.Logf("org poly reference:0x%x\n", orgRef)
 
 		// get dst polygon reference
-		st, dstRef, dst = query.FindNearestPoly(tt.dst, extents, filter)
-		if StatusFailed(st) {
-			t.Fatal("couldn't find nearest poly of", tt.dst, ":", st)
+		dstRef, dst, err := query.FindNearestPoly(tt.dst, extents, filter)
+		if err != nil {
+			t.Fatal("couldn't find nearest poly of", tt.dst, ":", err)
 		}
 		if !mesh.IsValidPolyRef(dstRef) {
 			t.Fatal("dstRef", dstRef, "is not a valid poly ref")
@@ -154,47 +144,36 @@ func TestOffMeshConnections(t *testing.T) {
 		t.Logf("dst poly reference:0x%x\n", dstRef)
 
 		// FindPath
-		var (
-			pathCount int
-		)
-		path = make([]PolyRef, 100)
-		pathCount, st = query.FindPath(orgRef, dstRef, org, dst, filter, path)
-		if StatusFailed(st) {
-			t.Fatal("query.FindPath failed:", st)
+		path := make([]PolyRef, 100)
+		path, err = query.FindPath(orgRef, dstRef, org, dst, filter, path)
+		if err != nil {
+			t.Fatal("query.FindPath failed:", err)
 		}
 
-		if !reflect.DeepEqual(tt.wantPath, path[:pathCount]) {
-			t.Fatalf("found path is not correct, want %#v, got %#v", tt.wantPath, path[:pathCount])
+		if !reflect.DeepEqual(tt.wantPath, path) {
+			t.Fatalf("found path is not correct, want %#v, got %#v", tt.wantPath, path)
 		}
 
 		// FindStraightPath
 		var (
-			straightPath      []d3.Vec3
-			straightPathFlags []uint8
-			straightPathRefs  []PolyRef
 			straightPathCount int
 			maxStraightPath   int32
 		)
 		// slices that receive the straight path
 		maxStraightPath = 100
-		straightPath = make([]d3.Vec3, maxStraightPath)
-		for i := range straightPath {
-			straightPath[i] = d3.NewVec3()
-		}
-		straightPathFlags = make([]uint8, maxStraightPath)
-		straightPathRefs = make([]PolyRef, maxStraightPath)
+		straightPath := make([]Path, maxStraightPath)
 
-		straightPathCount, st = query.FindStraightPath(tt.org, tt.dst, path[:pathCount], straightPath, straightPathFlags, straightPathRefs, 0)
-		if StatusFailed(st) {
-			t.Fatal("query.FindStraightPath failed:", st)
+		straightPathCount, err = query.FindStraightPath(tt.org, tt.dst, path, straightPath, 0)
+		if err != nil {
+			t.Fatal("query.FindStraightPath failed:", err)
 		}
 
-		if (straightPathFlags[0] & StraightPathStart) == 0 {
+		if (straightPath[0].Flags & StraightPathStart) == 0 {
 			t.Fatal("straightPath start is not flagged StraightPathStart")
 		}
 
 		fmt.Println("StraightPathCount == ", straightPathCount)
-		if (straightPathFlags[straightPathCount-1] & StraightPathEnd) == 0 {
+		if (straightPath[straightPathCount-1].Flags & StraightPathEnd) == 0 {
 			t.Fatal("straightPath end is not flagged StraightPathEnd")
 		}
 
@@ -202,10 +181,10 @@ func TestOffMeshConnections(t *testing.T) {
 			t.Fatalf("found path and wanted path do not have the same length (%d != %d)", straightPathCount, len(tt.wantStraightPath))
 		}
 		for i := 0; i < straightPathCount; i++ {
-			log.Printf("straightPath[%d].Flags = 0x%x\n", i, straightPathFlags[i])
+			log.Printf("straightPath[%d].Flags = 0x%x\n", i, straightPath[i].Flags)
 		}
-		for i := 0; i < pathCount; i++ {
-			if !straightPath[i].Approx(tt.wantStraightPath[i]) {
+		for i := 0; i < len(path); i++ {
+			if !straightPath[i].Point.ApproxEqual(tt.wantStraightPath[i]) {
 				t.Errorf("straightPath[%d] = %v, want %v", i, straightPath[i], tt.wantStraightPath[i])
 			}
 		}

@@ -2,7 +2,7 @@ package recast
 
 import (
 	"fmt"
-	"io"
+	"log"
 )
 
 const (
@@ -70,7 +70,8 @@ type BuildSettings struct {
 // InputGeom gathers the geometry used as input for navigation mesh building.
 type InputGeom struct {
 	chunkyMesh *ChunkyTriMesh
-	mesh       *MeshLoaderOBJ
+	verts      []float32
+	tris       []int32
 
 	meshBMin, meshBMax [3]float32
 
@@ -88,34 +89,38 @@ type InputGeom struct {
 	volumeCount int32
 }
 
-// LoadOBJMesh loads the geometry from a reader on a OBJ file.
-func (ig *InputGeom) LoadOBJMesh(r io.Reader) error {
-	var err error
-	if ig.mesh != nil {
-		ig.chunkyMesh = nil
-		ig.mesh = nil
-	}
-	ig.offMeshConCount = 0
-	ig.volumeCount = 0
+func NewInputGeom(verts []float32, tris []int32) (*InputGeom, error) {
+	bmin, bmax := CalcBounds(verts)
+	log.Println(len(verts), bmin, bmax)
 
-	ig.mesh = NewMeshLoaderOBJ()
-	if err = ig.mesh.Load(r); err != nil {
-		return err
+	chunkyMesh, ok := NewChunkyTriMesh(verts, tris, 256)
+	if !ok {
+		return nil, fmt.Errorf("failed to build chunky mesh")
 	}
 
-	CalcBounds(ig.mesh.Verts(), ig.mesh.VertCount(), ig.meshBMin[:], ig.meshBMax[:])
-
-	ig.chunkyMesh = new(ChunkyTriMesh)
-	if !createChunkyTriMesh(ig.mesh.Verts(), ig.mesh.Tris(), ig.mesh.TriCount(), 256, ig.ChunkyMesh()) {
-		return fmt.Errorf("failed to build chunky mesh")
-	}
-
-	return nil
+	return &InputGeom{
+		verts:      verts,
+		tris:       tris,
+		meshBMin:   bmin,
+		meshBMax:   bmax,
+		chunkyMesh: chunkyMesh,
+	}, nil
 }
 
-// Mesh returns static mesh data.
-func (ig *InputGeom) Mesh() *MeshLoaderOBJ {
-	return ig.mesh
+func (ig *InputGeom) Verts() []float32 {
+	return ig.verts
+}
+
+func (ig *InputGeom) NumVerts() int32 {
+	return int32(len(ig.verts) / 3)
+}
+
+func (ig *InputGeom) Tris() []int32 {
+	return ig.tris
+}
+
+func (ig *InputGeom) NumTris() int32 {
+	return int32(len(ig.tris) / 3)
 }
 
 // MeshBoundsMin return the min point of the mesh bounding box.

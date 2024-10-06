@@ -1,6 +1,8 @@
 package detour
 
-import "github.com/arl/gogeo/f32/d3"
+import (
+	"github.com/johanhenriksson/goworld/math/vec3"
+)
 
 // QueryFilter defines polygon filtering and traversal
 // costs for navigation mesh query operations.
@@ -41,7 +43,7 @@ type QueryFilter interface {
 	//   nextRef  The reference id of the next polygon.
 	//   nextTile The tile containing the next polygon.
 	//   nextPoly The next polygon.
-	Cost(pa, pb d3.Vec3,
+	Cost(pa, pb vec3.T,
 		prevRef PolyRef, prevTile *MeshTile, prevPoly *Poly,
 		curRef PolyRef, curTile *MeshTile, curPoly *Poly,
 		nextRef PolyRef, nextTile *MeshTile, nextPoly *Poly) float32
@@ -132,10 +134,10 @@ func (qf *StandardQueryFilter) PassFilter(ref PolyRef, tile *MeshTile, poly *Pol
 //	 nextRef  The reference id of the next polygon.
 //	 nextTile The tile containing the next polygon.
 //	 nextPoly The next polygon.
-func (qf *StandardQueryFilter) Cost(pa, pb d3.Vec3,
+func (qf *StandardQueryFilter) Cost(pa, pb vec3.T,
 	prevRef PolyRef, prevTile *MeshTile, prevPoly *Poly,
 	curRef PolyRef, curTile *MeshTile, curPoly *Poly,
 	nextRef PolyRef, nextTile *MeshTile, nextPoly *Poly) float32 {
 
-	return pa.Dist(pb) * qf.areaCost[curPoly.Area()]
+	return vec3.Distance(pa, pb) * qf.areaCost[curPoly.Area()]
 }

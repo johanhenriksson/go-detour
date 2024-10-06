@@ -14,23 +14,21 @@ type MeshLoaderOBJ struct {
 	normals []float32
 }
 
-func NewMeshLoaderOBJ() *MeshLoaderOBJ {
-	return &MeshLoaderOBJ{
+func NewMeshLoaderOBJ(r io.Reader) (*MeshLoaderOBJ, error) {
+	mlo := &MeshLoaderOBJ{
 		scale:   1.0,
 		verts:   make([]float32, 0),
 		tris:    make([]int32, 0),
 		normals: make([]float32, 0),
 	}
-}
 
-func (mlo *MeshLoaderOBJ) Load(r io.Reader) error {
 	var (
 		obj *gobj.OBJFile
 		err error
 	)
 	obj, err = gobj.Decode(r)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// copy vertices indices from OBJ,
@@ -83,7 +81,7 @@ func (mlo *MeshLoaderOBJ) Load(r io.Reader) error {
 		}
 	}
 
-	return nil
+	return mlo, nil
 }
 
 func (mlo *MeshLoaderOBJ) Scale() float32 {

@@ -3,7 +3,7 @@ package detour
 import (
 	"testing"
 
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func TestCalcPolyCenter(t *testing.T) {
@@ -14,76 +14,54 @@ func TestCalcPolyCenter(t *testing.T) {
 
 	polyTests := []struct {
 		ref  PolyRef
-		want d3.Vec3
+		want vec3.T
 	}{
-		{0x440000, d3.Vec3{3.6002522, 0.189468, 10.873747}},
-		{0x460007, d3.Vec3{11.460253, 0.189468, 14.758746}},
+		{0x440000, vec3.New(3.6002522, 0.189468, 10.873747)},
+		{0x460007, vec3.New(11.460253, 0.189468, 14.758746)},
 	}
 
 	mesh, err = loadTestNavMesh("mesh2.bin")
 	checkt(t, err)
 
 	for _, tt := range polyTests {
-
-		var (
-			tile *MeshTile
-			poly *Poly
-		)
-		mesh.TileAndPolyByRef(tt.ref, &tile, &poly)
+		tile, poly, err := mesh.TileAndPolyByRef(tt.ref)
+		if err != nil {
+			t.Errorf("couldn't retrieve tile and poly for ref 0x%x", tt.ref)
+		}
 		got := CalcPolyCenter(poly.Verts[:], int32(poly.VertCount), tile.Verts)
-		if !got.Approx(tt.want) {
+		if !got.ApproxEqual(tt.want) {
 			t.Errorf("want centroid of poly 0x%x = %v, got %v", tt.ref, tt.want, got)
 		}
 	}
 }
 
 func TestFindNearestPolySpecialCases(t *testing.T) {
-	var (
-		mesh *NavMesh
-		err  error
-	)
-
 	pathTests := []struct {
 		msg     string  // test description
-		pt      d3.Vec3 // point
-		ext     d3.Vec3 // search extents
-		wantSt  Status  // expected status
+		pt      vec3.T  // point
+		ext     vec3.T  // search extents
+		wantErr error   // expected status
 		wantRef PolyRef // expected ref (if query succeeded)
 	}{
 		{
 			"search box does not intersect any poly",
-			d3.Vec3{-5, 0, 10}, d3.Vec3{1, 1, 1}, Success, 0,
-		},
-		{
-			"unallocated center vector",
-			d3.Vec3{}, d3.Vec3{1, 1, 1}, Failure | InvalidParam, 0,
-		},
-		{
-			"unallocated extents vector",
-			d3.Vec3{0, 0, 0}, d3.Vec3{}, Failure | InvalidParam, 0,
+			vec3.New(-5, 0, 10), vec3.New(1, 1, 1), nil, 0,
 		},
 	}
 
-	mesh, err = loadTestNavMesh("mesh2.bin")
+	mesh, err := loadTestNavMesh("mesh2.bin")
 	checkt(t, err)
 
 	for _, tt := range pathTests {
-		var (
-			q   *NavMeshQuery
-			st  Status
-			ref PolyRef
-			f   QueryFilter
-		)
+		q, err := NewNavMeshQuery(mesh, 100)
+		f := NewStandardQueryFilter()
 
-		st, q = NewNavMeshQuery(mesh, 100)
-		f = NewStandardQueryFilter()
-
-		st, ref, _ = q.FindNearestPoly(tt.pt, tt.ext, f)
-		if st != tt.wantSt {
-			t.Errorf("%s, want status 0x%x, got 0x%x", tt.msg, tt.wantSt, st)
+		ref, _, err := q.FindNearestPoly(tt.pt, tt.ext, f)
+		if err != tt.wantErr {
+			t.Errorf("%s, want status 0x%x, got 0x%x", tt.msg, tt.wantErr, err)
 		}
 
-		if StatusSucceed(st) && ref != tt.wantRef {
+		if ref != tt.wantRef {
 			t.Errorf("%s, want ref 0x%x, got 0x%x", tt.msg, tt.wantRef, ref)
 		}
 	}

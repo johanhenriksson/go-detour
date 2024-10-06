@@ -1,12 +1,13 @@
 package detour
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func checkt(t *testing.T, err error) {
@@ -16,12 +17,7 @@ func checkt(t *testing.T, err error) {
 }
 
 func loadTestNavMesh(fname string) (*NavMesh, error) {
-	var (
-		f   *os.File
-		err error
-	)
-
-	f, err = os.Open(filepath.Join("..", "testdata", fname))
+	f, err := os.Open(filepath.Join("..", "testdata", fname))
 	if err != nil {
 		return nil, err
 	}
@@ -36,13 +32,13 @@ func TestFindPathFindStraightPath(t *testing.T) {
 	)
 
 	pathTests := []struct {
-		org, dst         d3.Vec3
+		org, dst         vec3.T
 		wantPath         []PolyRef
-		wantStraightPath []d3.Vec3
+		wantStraightPath []vec3.T
 	}{
 		{
-			d3.Vec3{37.298489, -1.776901, 11.652311},
-			d3.Vec3{42.457218, 7.797607, 17.778244},
+			vec3.New(37.298489, -1.776901, 11.652311),
+			vec3.New(42.457218, 7.797607, 17.778244),
 			[]PolyRef{
 				0x18c,
 				0x18a,
@@ -57,14 +53,14 @@ func TestFindPathFindStraightPath(t *testing.T) {
 				0x176,
 				0x19d,
 				0x19f},
-			[]d3.Vec3{
-				d3.NewVec3XYZ(37.298489, -1.776901, 11.652311),
-				d3.NewVec3XYZ(35.310688, -0.469517, 5.899849),
-				d3.NewVec3XYZ(34.410686, -0.669517, -1.600151),
-				d3.NewVec3XYZ(35.610683, -0.069517, -1.900150),
-				d3.NewVec3XYZ(36.510685, 0.730483, -0.400150),
-				d3.NewVec3XYZ(41.010685, 7.930483, 15.199852),
-				d3.NewVec3XYZ(42.457218, 7.797607, 17.778244),
+			[]vec3.T{
+				vec3.New(37.298489, -1.776901, 11.652311),
+				vec3.New(35.310688, -0.469517, 5.899849),
+				vec3.New(34.410686, -0.669517, -1.600151),
+				vec3.New(35.610683, -0.069517, -1.900150),
+				vec3.New(36.510685, 0.730483, -0.400150),
+				vec3.New(41.010685, 7.930483, 15.199852),
+				vec3.New(42.457218, 7.797607, 17.778244),
 			},
 		},
 	}
@@ -74,88 +70,78 @@ func TestFindPathFindStraightPath(t *testing.T) {
 
 	for _, tt := range pathTests {
 		var (
-			query          *NavMeshQuery // the query instance
-			filter         QueryFilter   // the query filter
-			orgRef, dstRef PolyRef       // find poly query results
-			org, dst       d3.Vec3       // find poly query results
-			st             Status        // status flags
-			path           []PolyRef     // returned path
+			path []PolyRef // returned path
 		)
 
-		st, query = NewNavMeshQuery(mesh, 1000)
-		if StatusFailed(st) {
-			t.Fatalf("query creation failed with status 0x%x\n", st)
+		query, err := NewNavMeshQuery(mesh, 1000)
+		if errors.Is(err, ErrFailure) {
+			t.Fatalf("query creation failed with status 0x%x\n", err)
 		}
 		// define the extents vector for the nearest polygon query
-		extents := d3.NewVec3XYZ(2, 4, 2)
+		extents := vec3.New(2, 4, 2)
 
 		// create a default query filter
-		filter = NewStandardQueryFilter()
+		filter := NewStandardQueryFilter()
 
 		// get org polygon reference
-		st, orgRef, org = query.FindNearestPoly(tt.org, extents, filter)
-		if StatusFailed(st) {
-			t.Fatalf("couldn't find nearest poly of %v, status: 0x%x\n", tt.org, st)
+		orgRef, org, err := query.FindNearestPoly(tt.org, extents, filter)
+		if errors.Is(err, ErrFailure) {
+			t.Fatalf("couldn't find nearest poly of %v, error: %s\n", tt.org, err)
 		}
 		if !mesh.IsValidPolyRef(orgRef) {
 			t.Fatalf("orgRef %d is not a valid poly ref", orgRef)
 		}
+		if orgRef != tt.wantPath[0] {
+			t.Fatalf("orgRef %d is not the expected poly ref %d", orgRef, tt.wantPath[0])
+		}
 
 		// get dst polygon reference
-		st, dstRef, dst = query.FindNearestPoly(tt.dst, extents, filter)
-		if StatusFailed(st) {
-			t.Fatalf("couldn't find nearest poly of %v, status: 0x%x\n", tt.org, st)
+		dstRef, dst, err := query.FindNearestPoly(tt.dst, extents, filter)
+		if errors.Is(err, ErrFailure) {
+			t.Fatalf("couldn't find nearest poly of %v, error: %s\n", tt.org, err)
 		}
 		if !mesh.IsValidPolyRef(dstRef) {
 			t.Fatalf("dstRef %d is not a valid poly ref", dstRef)
 		}
-
-		// FindPath
-		var (
-			pathCount int
-		)
-		path = make([]PolyRef, 100)
-		pathCount, st = query.FindPath(orgRef, dstRef, org, dst, filter, path)
-		if StatusFailed(st) {
-			t.Fatalf("query.FindPath failed with 0x%x\n", st)
+		if dstRef != tt.wantPath[len(tt.wantPath)-1] {
+			t.Fatalf("dstRef %d is not the expected poly ref %d", dstRef, tt.wantPath[len(tt.wantPath)-1])
 		}
 
-		if !reflect.DeepEqual(tt.wantPath, path[:pathCount]) {
-			t.Fatalf("found path is not correct, want %#v, got %#v", tt.wantPath, path[:pathCount])
+		// FindPath
+		path = make([]PolyRef, 100)
+		path, err = query.FindPath(orgRef, dstRef, org, dst, filter, path)
+		if errors.Is(err, ErrFailure) {
+			t.Fatalf("query.FindPath failed with 0x%x\n", err)
+		}
+
+		if !reflect.DeepEqual(tt.wantPath, path) {
+			t.Fatalf("found path is not correct, want %#v, got %#v", tt.wantPath, path)
 		}
 
 		// FindStraightPath
 		var (
-			straightPath      []d3.Vec3
-			straightPathFlags []uint8
-			straightPathRefs  []PolyRef
 			straightPathCount int
 			maxStraightPath   int32
 		)
 		// slices that receive the straight path
 		maxStraightPath = 100
-		straightPath = make([]d3.Vec3, maxStraightPath)
-		for i := range straightPath {
-			straightPath[i] = d3.NewVec3()
-		}
-		straightPathFlags = make([]uint8, maxStraightPath)
-		straightPathRefs = make([]PolyRef, maxStraightPath)
+		straightPath := make([]Path, maxStraightPath)
 
-		straightPathCount, st = query.FindStraightPath(tt.org, tt.dst, path[:pathCount], straightPath, straightPathFlags, straightPathRefs, 0)
-		if StatusFailed(st) {
-			t.Errorf("query.FindStraightPath failed with 0x%x\n", st)
+		straightPathCount, err = query.FindStraightPath(tt.org, tt.dst, path, straightPath, 0)
+		if errors.Is(err, ErrFailure) {
+			t.Errorf("query.FindStraightPath failed with %s\n", err)
 		}
 
-		if (straightPathFlags[0] & StraightPathStart) == 0 {
+		if (straightPath[0].Flags & StraightPathStart) == 0 {
 			t.Errorf("straightPath start is not flagged StraightPathStart")
 		}
 
-		if (straightPathFlags[straightPathCount-1] & StraightPathEnd) == 0 {
+		if (straightPath[straightPathCount-1].Flags & StraightPathEnd) == 0 {
 			t.Errorf("straightPath end is not flagged StraightPathEnd")
 		}
 
 		for i := 0; i < straightPathCount; i++ {
-			if !straightPath[i].Approx(tt.wantStraightPath[i]) {
+			if !straightPath[i].Point.ApproxEqual(tt.wantStraightPath[i]) {
 				t.Errorf("straightPath[%d] = %v, want %v", i, straightPath[i], tt.wantStraightPath[i])
 			}
 		}
@@ -169,66 +155,55 @@ func TestFindPathSpecialCases(t *testing.T) {
 	)
 
 	pathTests := []struct {
-		msg           string  // test description
-		org, dst      d3.Vec3 // path origin and destination points
-		wantStatus    Status  // expected status
-		wantPathCount int     // expected path count
+		msg           string // test description
+		org, dst      vec3.T // path origin and destination points
+		wantErr       error  // expected status
+		wantPathCount int    // expected path count
 	}{
-		{"org == dst", d3.Vec3{5, 0, 10}, d3.Vec3{5, 0, 10}, Success, 1},
+		{"org == dst", vec3.New(5, 0, 10), vec3.New(5, 0, 10), nil, 1},
 	}
 
 	mesh, err = loadTestNavMesh("mesh2.bin")
 	checkt(t, err)
 
 	for _, tt := range pathTests {
-		var (
-			query          *NavMeshQuery // the query instance
-			filter         QueryFilter   // the query filter
-			orgRef, dstRef PolyRef       // find poly query results
-			org, dst       d3.Vec3       // find poly query results
-			st             Status        // status flags
-			path           []PolyRef     // returned path
-		)
-
-		st, query = NewNavMeshQuery(mesh, 1000)
-		if StatusFailed(st) {
-			t.Errorf("query creation failed with status 0x%x\n", st)
+		query, err := NewNavMeshQuery(mesh, 1000)
+		if err != nil {
+			t.Errorf("query creation failed with error %s\n", err)
 		}
 		// define the extents vector for the nearest polygon query
-		extents := d3.NewVec3XYZ(0, 2, 0)
+		extents := vec3.New(0, 2, 0)
 
 		// create a default query filter
-		filter = NewStandardQueryFilter()
+		filter := NewStandardQueryFilter()
 
 		// get org polygon reference
-		st, orgRef, org = query.FindNearestPoly(tt.org, extents, filter)
-		if StatusFailed(st) {
-			t.Errorf("couldn't find nearest poly of %v, status: 0x%x\n", tt.org, st)
+		orgRef, org, err := query.FindNearestPoly(tt.org, extents, filter)
+		if err != nil {
+			t.Errorf("couldn't find nearest poly of %v, error: %s\n", tt.org, err)
 		}
 		if !mesh.IsValidPolyRef(orgRef) {
-			t.Errorf("invalid ref (0x%x) for nearest poly of %v, status: 0x%x", orgRef, tt.org, st)
+			t.Errorf("invalid ref (0x%x) for nearest poly of %v, status: %s", orgRef, tt.org, err)
 		}
 
 		// get dst polygon reference
-		st, dstRef, dst = query.FindNearestPoly(tt.dst, extents, filter)
-		if StatusFailed(st) {
-			t.Errorf("couldn't find nearest poly of %v, status: 0x%x\n", tt.org, st)
+		dstRef, dst, err := query.FindNearestPoly(tt.dst, extents, filter)
+		if err != nil {
+			t.Errorf("couldn't find nearest poly of %v, status: %s\n", tt.org, err)
 		}
 		if !mesh.IsValidPolyRef(dstRef) {
 			t.Errorf("dstRef %d is not a valid poly ref", dstRef)
 		}
 
 		// FindPath
-		var pathCount int
+		path := make([]PolyRef, 100)
+		path, err = query.FindPath(orgRef, dstRef, org, dst, filter, path)
 
-		path = make([]PolyRef, 100)
-		pathCount, st = query.FindPath(orgRef, dstRef, org, dst, filter, path)
-
-		if st != tt.wantStatus {
-			t.Errorf("%s, got status 0x%x, want 0x%x", tt.msg, st, tt.wantStatus)
+		if err != tt.wantErr {
+			t.Errorf("%s, got error %s, want %s", tt.msg, err, tt.wantErr)
 		}
-		if pathCount != tt.wantPathCount {
-			t.Errorf("%s, got pathCount 0x%x, want 0x%x", tt.msg, pathCount, tt.wantPathCount)
+		if len(path) != tt.wantPathCount {
+			t.Errorf("%s, got pathCount %d, want %d", tt.msg, len(path), tt.wantPathCount)
 		}
 	}
 }

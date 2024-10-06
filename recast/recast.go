@@ -12,21 +12,23 @@ import (
 // CalcBounds calculates the bounding box of an array of vertices.
 //
 //	Arguments:
-//	 verts     An array of vertices. [(x, y, z) * nv]
-//	 nv        The number of vertices in the verts array.
-//	 bmin      The minimum bounds of the AABB. [(x, y, z)] [Units: wu]
-//	 bmax      The maximum bounds of the AABB. [(x, y, z)] [Units: wu]
-func CalcBounds(verts []float32, nv int32, bmin, bmax []float32) {
+//		 verts     An array of nv vertices. [(x, y, z) * nv]
+//
+//	 Returns:
+//		 bmin      The minimum bounds of the AABB. [(x, y, z)] [Units: wu]
+//		 bmax      The maximum bounds of the AABB. [(x, y, z)] [Units: wu]
+func CalcBounds(verts []float32) (bmin, bmax [3]float32) {
 	// Calculate bounding box.
-	copy(bmin, verts[:3])
-	copy(bmax, verts[:3])
+	copy(bmin[:], verts[:3])
+	copy(bmax[:], verts[:3])
 
-	var v []float32
-	for i := int32(1); i < nv; i++ {
-		v = verts[i*3:]
-		d3.Vec3Min(bmin, v)
-		d3.Vec3Max(bmax, v)
+	nv := len(verts) / 3
+	for i := 1; i < nv; i++ {
+		v := verts[i*3 : (i+1)*3]
+		d3.Vec3Min(bmin[:], v)
+		d3.Vec3Max(bmax[:], v)
 	}
+	return
 }
 
 // CalcGridSize calculates the grid size based on the bounding box and grid cell

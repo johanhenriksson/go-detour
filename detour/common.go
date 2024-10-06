@@ -1,8 +1,8 @@
 package detour
 
 import (
-	"github.com/arl/gogeo/f32/d3"
-	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 // Computational geometry helper functions.
@@ -15,26 +15,26 @@ import (
 //	c   Vertex C. [(x, y, z)]
 //
 // return The signed xz-plane area of the triangle.
-func TriArea2D(a, b, c d3.Vec3) float32 {
-	abx := b[0] - a[0]
-	abz := b[2] - a[2]
-	acx := c[0] - a[0]
-	acz := c[2] - a[2]
+func TriArea2D(a, b, c vec3.T) float32 {
+	abx := b.X - a.X
+	abz := b.Z - a.Z
+	acx := c.X - a.X
+	acz := c.Z - a.Z
 	return acx*abz - abx*acz
 }
 
 // IntersectSegSeg2D returns whether two segments intersect, and their
 // intersection point.
-func IntersectSegSeg2D(ap, aq, bp, bq d3.Vec3) (hit bool, s, t float32) {
+func IntersectSegSeg2D(ap, aq, bp, bq vec3.T) (hit bool, s, t float32) {
 	u := aq.Sub(ap)
 	v := bq.Sub(bp)
 	w := ap.Sub(bp)
 
-	d := u.Perp2D(v)
-	if math32.Abs(d) < 1e-6 {
+	d := perp2D(u, v)
+	if math.Abs(d) < 1e-6 {
 		return false, s, t
 	}
-	return true, v.Perp2D(w) / d, u.Perp2D(w) / d
+	return true, perp2D(v, w) / d, perp2D(u, w) / d
 }
 
 // OverlapQuantBounds determines if two axis-aligned bounding boxes overlap.
@@ -71,36 +71,40 @@ func OverlapQuantBounds(amin, amax, bmin, bmax []uint16) bool {
 //
 // Return True if the two AABB's overlap.
 // see overlapQuantBounds
-func OverlapBounds(amin, amax, bmin, bmax []float32) bool {
-	if amin[0] > bmax[0] || amax[0] < bmin[0] {
+func OverlapBounds(amin, amax, bmin, bmax vec3.T) bool {
+	if amin.X > bmax.X || amax.X < bmin.X {
 		return false
 	}
-	if amin[1] > bmax[1] || amax[1] < bmin[1] {
+	if amin.Y > bmax.Y || amax.Y < bmin.Y {
 		return false
 	}
-	if amin[2] > bmax[2] || amax[2] < bmin[2] {
+	if amin.Z > bmax.Z || amax.Z < bmin.Z {
 		return false
 	}
 	return true
 }
 
-func distancePtPolyEdgesSqr(pt, verts []float32, nverts int32, ed, et []float32) bool {
+func distancePtPolyEdgesSqr(pt vec3.T, verts []vec3.T, ed, et []float32) bool {
 	// TODO: Replace pnpoly with triArea2D tests?
 	c := false
-	for i, j := 0, (nverts - 1); i < int(nverts); i++ {
-		vi := verts[i*3 : i*3+3]
-		vj := verts[j*3 : j*3+3]
-		if ((vi[2] > pt[2]) != (vj[2] > pt[2])) &&
-			(pt[0] < (vj[0]-vi[0])*(pt[2]-vi[2])/(vj[2]-vi[2])+vi[0]) {
+	for i, j := 0, (len(verts) - 1); i < len(verts); i++ {
+		vi := verts[i]
+		vj := verts[j]
+		if ((vi.Z > pt.Z) != (vj.Z > pt.Z)) &&
+			(pt.X < (vj.X-vi.X)*(pt.Z-vi.Z)/(vj.Z-vi.Z)+vi.X) {
 			c = !c
 		}
 		ed[j] = distancePtSegSqr2D(pt, vj, vi, &et[j])
-		j = int32(i)
+		j = i
 	}
 	return c
 }
 
-func IntersectSegmentPoly2D(p0, p1 d3.Vec3, verts []float32, nverts int) (tmin, tmax float32, segMin, segMax int, res bool) {
+func perp2D(v, u vec3.T) float32 {
+	return v.Z*u.X - v.X*u.Z
+}
+
+func IntersectSegmentPoly2D(p0, p1 vec3.T, verts []vec3.T) (tmin, tmax float32, segMin, segMax int, res bool) {
 	const eps float32 = 0.00000001
 
 	tmin = 0
@@ -108,14 +112,14 @@ func IntersectSegmentPoly2D(p0, p1 d3.Vec3, verts []float32, nverts int) (tmin, 
 	segMin = -1
 	segMax = -1
 
-	var dir d3.Vec3 = p1.Sub(p0)
-	j := nverts - 1
-	for i := 0; i < nverts; i++ {
-		edge := d3.Vec3(verts[i*3:]).Sub(d3.Vec3(verts[j*3:]))
-		diff := p0.Sub(d3.Vec3(verts[j*3:]))
-		n := edge.Perp2D(diff)
-		d := dir.Perp2D(edge)
-		if math32.Abs(d) < eps {
+	dir := p1.Sub(p0)
+	j := len(verts) - 1
+	for i := 0; i < len(verts); i++ {
+		edge := verts[i].Sub(verts[j])
+		diff := p0.Sub(verts[j])
+		n := perp2D(edge, diff)
+		d := perp2D(dir, edge)
+		if math.Abs(d) < eps {
 			// S is nearly parallel to this edge
 			if n < 0 {
 				return
@@ -152,11 +156,11 @@ func IntersectSegmentPoly2D(p0, p1 d3.Vec3, verts []float32, nverts int) (tmin, 
 	return
 }
 
-func distancePtSegSqr2D(pt, p, q d3.Vec3, t *float32) float32 {
-	pqx := q[0] - p[0]
-	pqz := q[2] - p[2]
-	dx := pt[0] - p[0]
-	dz := pt[2] - p[2]
+func distancePtSegSqr2D(pt, p, q vec3.T, t *float32) float32 {
+	pqx := q.X - p.X
+	pqz := q.Z - p.Z
+	dx := pt.X - p.X
+	dz := pt.Z - p.Z
 	d := pqx*pqx + pqz*pqz
 	*t = pqx*dx + pqz*dz
 	if d > 0 {
@@ -167,21 +171,25 @@ func distancePtSegSqr2D(pt, p, q d3.Vec3, t *float32) float32 {
 	} else if *t > 1 {
 		*t = 1
 	}
-	dx = p[0] + *t*pqx - pt[0]
-	dz = p[2] + *t*pqz - pt[2]
+	dx = p.X + *t*pqx - pt.X
+	dz = p.Z + *t*pqz - pt.Z
 	return dx*dx + dz*dz
 }
 
-func closestHeightPointTriangle(p, a, b, c d3.Vec3, h *float32) bool {
+func dot2D(v, u vec3.T) float32 {
+	return v.X*u.X + v.Z*u.Z
+}
+
+func closestHeightPointTriangle(p, a, b, c vec3.T) (h float32, ok bool) {
 	v0 := c.Sub(a)
 	v1 := b.Sub(a)
 	v2 := p.Sub(a)
 
-	dot00 := v0.Dot2D(v0)
-	dot01 := v0.Dot2D(v1)
-	dot02 := v0.Dot2D(v2)
-	dot11 := v1.Dot2D(v1)
-	dot12 := v1.Dot2D(v2)
+	dot00 := dot2D(v0, v0)
+	dot01 := dot2D(v0, v1)
+	dot02 := dot2D(v0, v2)
+	dot11 := dot2D(v1, v1)
+	dot12 := dot2D(v1, v2)
 
 	// Compute barycentric coordinates
 	invDenom := 1.0 / (dot00*dot11 - dot01*dot01)
@@ -194,11 +202,11 @@ func closestHeightPointTriangle(p, a, b, c d3.Vec3, h *float32) bool {
 
 	// If point lies inside the triangle, return interpolated ycoord.
 	if u >= -EPS && v >= -EPS && (u+v) <= 1+EPS {
-		*h = a[1] + v0[1]*u + v1[1]*v
-		return true
+		h = a.Y + v0.Y*u + v1.Y*v
+		return h, true
 	}
 
-	return false
+	return 0, false
 }
 
 func oppositeTile(side int32) int32 {

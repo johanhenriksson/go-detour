@@ -2,10 +2,9 @@ package detour
 
 import (
 	"log"
-	"math"
 
-	"github.com/arl/gogeo/f32/d3"
-	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 // Provides custom polygon query behavior.
@@ -20,19 +19,19 @@ type polyQuery interface {
 
 type findNearestPolyQuery struct {
 	query              *NavMeshQuery
-	center             d3.Vec3
+	center             vec3.T
 	nearestDistanceSqr float32
 	nearestRef         PolyRef
-	nearestPoint       d3.Vec3
+	nearestPoint       vec3.T
 }
 
-func newFindNearestPolyQuery(query *NavMeshQuery, center d3.Vec3) *findNearestPolyQuery {
+func newFindNearestPolyQuery(query *NavMeshQuery, center vec3.T) *findNearestPolyQuery {
 	return &findNearestPolyQuery{
 		query:              query,
 		center:             center,
-		nearestDistanceSqr: math.MaxFloat32,
+		nearestDistanceSqr: math.MaxValue,
 		nearestRef:         0,
-		nearestPoint:       d3.NewVec3(),
+		nearestPoint:       vec3.Zero,
 	}
 }
 
@@ -40,30 +39,25 @@ func (q *findNearestPolyQuery) process(tile *MeshTile, polys []*Poly, refs []Pol
 
 	for i := int32(0); i < count; i++ {
 		ref := refs[i]
-		var (
-			closestPtPoly d3.Vec3
-			d             float32
-		)
-		posOverPoly := false
-		closestPtPoly = d3.NewVec3()
-		q.query.ClosestPointOnPoly(ref, q.center, closestPtPoly, &posOverPoly)
+		var d float32
+		closestPtPoly, posOverPoly, _ := q.query.ClosestPointOnPoly(ref, q.center)
 
 		// If a point is directly over a polygon and closer than
 		// climb height, favor that instead of straight line nearest point.
 		diff := q.center.Sub(closestPtPoly)
 		if posOverPoly {
-			d = math32.Abs(diff[1]) - tile.Header.WalkableClimb
+			d = math.Abs(diff.Y) - tile.Header.WalkableClimb
 			if d > 0 {
 				d = d * d
 			} else {
 				d = 0
 			}
 		} else {
-			d = diff.LenSqr()
+			d = diff.LengthSqr()
 		}
 
 		if d < q.nearestDistanceSqr {
-			q.nearestPoint.Assign(closestPtPoly)
+			q.nearestPoint = closestPtPoly
 
 			q.nearestDistanceSqr = d
 			q.nearestRef = ref

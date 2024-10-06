@@ -2,15 +2,14 @@ package solomesh
 
 import (
 	"bytes"
-	"io/ioutil"
-	"math"
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/arl/go-detour/detour"
 	"github.com/arl/go-detour/recast"
-	"github.com/arl/gogeo/f32/d3"
-	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func check(t *testing.T, err error) {
@@ -32,12 +31,12 @@ func compareFiles(fn1, fn2 string) (bool, error) {
 		f1, f2 []byte
 		err    error
 	)
-	f1, err = ioutil.ReadFile(fn1)
+	f1, err = os.ReadFile(fn1)
 	if err != nil {
 		return false, err
 	}
 
-	f2, err = ioutil.ReadFile(fn2)
+	f2, err = os.ReadFile(fn2)
 	if err != nil {
 		return false, err
 	}
@@ -69,7 +68,7 @@ func testCreateSoloMesh(t *testing.T, objName string) {
 	r, err := os.Open(path)
 	check(t, err)
 	defer r.Close()
-	if err = soloMesh.LoadGeometry(r); err != nil {
+	if err := soloMesh.LoadGeometry(r); err != nil {
 		ctx.DumpLog(os.Stdout, "")
 		t.Fatalf("couldn't load mesh %v", path)
 	}
@@ -212,41 +211,38 @@ func BenchmarkPathFindSoloMesh(b *testing.B) {
 		b.Fatalf("couldn't build navmesh for %v", objName)
 	}
 
-	st, query := detour.NewNavMeshQuery(navMesh, 2048)
-	if detour.StatusFailed(st) {
-		b.Fatalf("creation of navmesh query failed: %s", st)
+	query, err := detour.NewNavMeshQuery(navMesh, 2048)
+	if err != nil {
+		b.Fatalf("creation of navmesh query failed: %s", err)
 	}
 
 	const maxPolys = 256
 	var (
 		polys       [maxPolys]detour.PolyRef
-		straight    [maxPolys]d3.Vec3
-		polyPickExt = d3.NewVec3XYZ(2, 4, 2)
-		spos, epos  d3.Vec3
+		straight    [maxPolys]detour.Path
+		polyPickExt = vec3.New(2, 4, 2)
 	)
-
-	spos, epos = d3.NewVec3(), d3.NewVec3()
 
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		for _, bb := range benchs {
-			spos[0], spos[1], spos[2] = bb.xstart, bb.ystart, bb.zstart
-			epos[0], epos[1], epos[2] = bb.xend, bb.yend, bb.zend
+			spos := vec3.New(bb.xstart, bb.ystart, bb.zstart)
+			epos := vec3.New(bb.xend, bb.yend, bb.zend)
 
 			filter := detour.NewStandardQueryFilter()
 			filter.SetIncludeFlags(bb.incFlags)
 			filter.SetExcludeFlags(bb.excFlags)
 
 			var startRef, endRef detour.PolyRef
-			_, startRef, _ = query.FindNearestPoly(spos, polyPickExt, filter)
-			_, endRef, _ = query.FindNearestPoly(epos, polyPickExt, filter)
+			startRef, _, err = query.FindNearestPoly(spos, polyPickExt, filter)
+			endRef, _, err = query.FindNearestPoly(epos, polyPickExt, filter)
 
 			// find path
-			npolys, _ := query.FindPath(startRef, endRef, spos, epos, filter, polys[:])
+			polys, _ := query.FindPath(startRef, endRef, spos, epos, filter, polys[:])
 
 			// find straight path
-			if npolys != 0 {
-				query.FindStraightPath(spos, epos, polys[:], straight[:], nil, nil, 0)
+			if len(polys) != 0 {
+				query.FindStraightPath(spos, epos, polys[:], straight[:], 0)
 			}
 		}
 	}
@@ -269,9 +265,9 @@ func TestRaycastSoloMesh(t *testing.T) {
 		{40.389084, 7.797607, 17.144299, 45.056454, 7.418980, 12.680744, 0xffef, 0x0,
 			want{0.435627, 42.422318, 7.632667, 15.199852}},
 		{40.389084, 7.797607, 17.144299, 45.965542, 7.797607, 14.355331, 0xffef, 0x0,
-			want{math.MaxFloat32, 45.965542, 7.797607, 14.355331}},
+			want{math.MaxValue, 45.965542, 7.797607, 14.355331}},
 		{0.631622, 12.705303, 2.767708, 3.878273, 11.266037, -0.112907, 0xffef, 0x0,
-			want{math.MaxFloat32, 3.878273, 11.266037, -0.112907}},
+			want{math.MaxValue, 3.878273, 11.266037, -0.112907}},
 	}
 
 	var (
@@ -294,53 +290,50 @@ func TestRaycastSoloMesh(t *testing.T) {
 		t.Fatalf("couldn't build navmesh for %v", objName)
 	}
 
-	st, query := detour.NewNavMeshQuery(navMesh, 2048)
-	if detour.StatusFailed(st) {
-		t.Fatalf("creation of navmesh query failed: %s", st)
+	query, err := detour.NewNavMeshQuery(navMesh, 2048)
+	if err != nil {
+		t.Fatalf("creation of navmesh query failed: %s", err)
 	}
 
 	const maxPolys = 256
 	var (
-		polyPickExt        = d3.NewVec3XYZ(2, 4, 2)
-		spos, epos, hitPos d3.Vec3
+		polyPickExt = vec3.New(2, 4, 2)
 	)
 
-	spos, epos, hitPos = d3.NewVec3(), d3.NewVec3(), d3.NewVec3()
-
 	for _, tt := range tests {
-		spos[0], spos[1], spos[2] = tt.xstart, tt.ystart, tt.zstart
-		epos[0], epos[1], epos[2] = tt.xend, tt.yend, tt.zend
+		hitPos := vec3.Zero
+		spos := vec3.New(tt.xstart, tt.ystart, tt.zstart)
+		epos := vec3.New(tt.xend, tt.yend, tt.zend)
 
 		filter := detour.NewStandardQueryFilter()
 		filter.SetIncludeFlags(tt.incFlags)
 		filter.SetExcludeFlags(tt.excFlags)
 
 		var startRef detour.PolyRef
-		_, startRef, _ = query.FindNearestPoly(spos, polyPickExt, filter)
+		startRef, _, _ = query.FindNearestPoly(spos, polyPickExt, filter)
 
 		var hit detour.RaycastHit
-
-		st := query.Raycast(startRef, spos, epos, filter, 0, &hit, 0)
-		if detour.StatusFailed(st) {
+		err := query.Raycast(startRef, spos, epos, filter, 0, &hit, 0)
+		if errors.Is(err, detour.ErrFailure) {
 			t.Fatalf("Raycast (s:%f %f %f|e:%f %f %f |flags:%x %x) failed with status %s",
-				tt.xstart, tt.ystart, tt.zstart, tt.xend, tt.yend, tt.zend, tt.incFlags, tt.excFlags, st)
+				tt.xstart, tt.ystart, tt.zstart, tt.xend, tt.yend, tt.zend, tt.incFlags, tt.excFlags, err)
 		}
 
-		if !math32.Approx(hit.T, tt.want.t) {
+		if !math.ApproxEqual(hit.T, tt.want.t) {
 			t.Fatalf("Raycast (s:%f %f %f|e:%f %f %f |flags:%x %x) got t = %f want %f",
 				tt.xstart, tt.ystart, tt.zstart, tt.xend, tt.yend, tt.zend, tt.incFlags, tt.excFlags, hit.T, tt.want.t)
 		}
 
 		if hit.T > 1.0 {
 			// No hit
-			hitPos = d3.NewVec3From(epos)
+			hitPos = epos
 		} else {
 			// Hit
-			d3.Vec3Lerp(hitPos, spos, epos, hit.T)
+			hitPos = vec3.Lerp(spos, epos, hit.T)
 		}
 
-		wantHitPos := d3.NewVec3XYZ(tt.want.hitx, tt.want.hity, tt.want.hitz)
-		if !hitPos.Approx(wantHitPos) {
+		wantHitPos := vec3.New(tt.want.hitx, tt.want.hity, tt.want.hitz)
+		if !hitPos.ApproxEqual(wantHitPos) {
 			t.Fatalf("Raycast (s:%f %f %f|e:%f %f %f |flags:%x %x) got hit = %v want %v",
 				tt.xstart, tt.ystart, tt.zstart, tt.xend, tt.yend, tt.zend, tt.incFlags, tt.excFlags, hitPos, wantHitPos)
 		}
