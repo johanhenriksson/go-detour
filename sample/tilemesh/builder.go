@@ -10,6 +10,7 @@ import (
 	"github.com/arl/go-detour/sample"
 	"github.com/arl/gogeo/f32/d3"
 	"github.com/arl/math32"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 // TileMesh allows building multi-tile navigation meshes.
@@ -19,7 +20,7 @@ import (
 type TileMesh struct {
 	ctx               *recast.BuildContext
 	geom              recast.InputGeom
-	navMesh           detour.NavMesh
+	navMesh           *detour.NavMesh
 	meshName          string
 	cfg               recast.Config
 	partitionType     sample.PartitionType
@@ -97,27 +98,27 @@ func (tm *TileMesh) Build() (*detour.NavMesh, bool) {
 
 	var (
 		params detour.NavMeshParams
-		status detour.Status
+		err    error
 	)
-	copy(params.Orig[:], tm.geom.NavMeshBoundsMin()[:3])
+	params.Orig = vec3.FromSlice(tm.geom.NavMeshBoundsMin()[:3])
 	params.TileWidth = tm.settings.TileSize * tm.settings.CellSize
 	params.TileHeight = tm.settings.TileSize * tm.settings.CellSize
 	params.MaxTiles = tm.maxTiles
 	params.MaxPolys = tm.maxPolysPerTile
-	status = tm.navMesh.Init(&params)
-	if detour.StatusFailed(status) {
+	tm.navMesh, err = detour.New(&params)
+	if err != nil {
 		tm.ctx.Errorf("TileMesh.Build: Could not init navmesh")
 		return nil, false
 	}
-	status, _ = detour.NewNavMeshQuery(&tm.navMesh, 2048)
-	if detour.StatusFailed(status) {
+	_, err = detour.NewNavMeshQuery(tm.navMesh, 2048)
+	if err != nil {
 		tm.ctx.Errorf("TileMesh.Build: Could not init detour navmesh query")
 		return nil, false
 	}
 
 	tm.buildAllTiles()
 
-	return &tm.navMesh, true
+	return tm.navMesh, true
 }
 
 func (tm *TileMesh) buildAllTiles() (*detour.NavMesh, bool) {
@@ -158,7 +159,7 @@ func (tm *TileMesh) buildAllTiles() (*detour.NavMesh, bool) {
 	tm.totalBuildTime = tm.ctx.AccumulatedTime(recast.TimerTemp)
 
 	// TODO: probably useless
-	return &tm.navMesh, true
+	return tm.navMesh, true
 }
 
 func (tm *TileMesh) buildTileMesh(tx, ty int32, bmin, bmax []float32) []byte {
@@ -510,8 +511,8 @@ func (tm *TileMesh) buildTileMesh(tx, ty int32, bmin, bmax []float32) []byte {
 		params.TileX = tx
 		params.TileY = ty
 		params.TileLayer = 0
-		copy(params.BMin[:], tm.pmesh.BMin[:])
-		copy(params.BMax[:], tm.pmesh.BMax[:])
+		params.BMin = vec3.FromSlice(tm.pmesh.BMin[:])
+		params.BMax = vec3.FromSlice(tm.pmesh.BMax[:])
 		params.Cs = tm.cfg.Cs
 		params.Ch = tm.cfg.Ch
 		params.BuildBvTree = true
@@ -559,8 +560,8 @@ func (tm *TileMesh) BuildTile(pos d3.Vec3) {
 	// Add tile, or leave the location empty.
 	if data != nil {
 		// Let the navmesh own the data.
-		status, _ := tm.navMesh.AddTile(data, detour.TileRef(0))
-		if detour.StatusFailed(status) {
+		_, err := tm.navMesh.AddTile(data, detour.TileRef(0))
+		if err != nil {
 			data = nil
 		}
 	}

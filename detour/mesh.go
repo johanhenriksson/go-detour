@@ -83,8 +83,8 @@ func Decode(r io.Reader) (*NavMesh, error) {
 		return nil, fmt.Errorf("wrong version: %d", hdr.Version)
 	}
 
-	var mesh NavMesh
-	if err := mesh.Init(&hdr.Params); err != nil {
+	mesh, err := New(&hdr.Params)
+	if err != nil {
 		return nil, err
 	}
 
@@ -113,7 +113,7 @@ func Decode(r io.Reader) (*NavMesh, error) {
 			return nil, fmt.Errorf("couldnt add tile %d(), error: %w", i, err)
 		}
 	}
-	return &mesh, nil
+	return mesh, nil
 }
 
 // SaveToFile saves the navigation mesh as a binary file.
@@ -165,7 +165,7 @@ func (m *NavMesh) SaveToFile(fn string) error {
 	return nil
 }
 
-// InitForSingleTile set up the navigation mesh for single tile use.
+// NewSingleTile creates a navigation mesh for single tile use.
 //
 //	Arguments:
 //	 data     Data of the new tile. (See: CreateNavMeshData)
@@ -175,16 +175,16 @@ func (m *NavMesh) SaveToFile(fn string) error {
 // Return The status flags for the operation.
 //
 //	see CreateNavMeshData
-func (m *NavMesh) InitForSingleTile(data []uint8, flags int) error {
+func NewSingleTile(data []uint8, flags int) (*NavMesh, error) {
 	var header MeshHeader
 	header.unserialize(data)
 
 	// Make sure the data is in right format.
 	if header.Magic != navMeshMagic {
-		return ErrWrongMagic
+		return nil, ErrWrongMagic
 	}
 	if header.Version != navMeshVersion {
-		return ErrWrongVersion
+		return nil, ErrWrongVersion
 	}
 
 	var params NavMeshParams
@@ -194,12 +194,16 @@ func (m *NavMesh) InitForSingleTile(data []uint8, flags int) error {
 	params.MaxTiles = 1
 	params.MaxPolys = uint32(header.PolyCount)
 
-	if err := m.Init(&params); err != nil {
-		return err
+	m, err := New(&params)
+	if err != nil {
+		return nil, err
 	}
 
-	_, err := m.AddTile(data, TileRef(flags))
-	return err
+	if _, err := m.AddTile(data, TileRef(flags)); err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }
 
 // Init initializes the navigation mesh for tiled use.
@@ -208,11 +212,13 @@ func (m *NavMesh) InitForSingleTile(data []uint8, flags int) error {
 //	 params  Initialization parameters.
 //
 // Return the status flags for the operation.
-func (m *NavMesh) Init(params *NavMeshParams) error {
-	m.Params = *params
-	m.Orig = params.Orig
-	m.TileWidth = params.TileWidth
-	m.TileHeight = params.TileHeight
+func New(params *NavMeshParams) (*NavMesh, error) {
+	m := &NavMesh{
+		Params:     *params,
+		Orig:       params.Orig,
+		TileWidth:  params.TileWidth,
+		TileHeight: params.TileHeight,
+	}
 
 	// Init tiles
 	m.MaxTiles = int32(params.MaxTiles)
@@ -243,10 +249,10 @@ func (m *NavMesh) Init(params *NavMeshParams) error {
 
 	// if m.saltBits < 10 {
 	if m.saltBits < 8 {
-		return ErrInvalidParam
+		return nil, ErrInvalidParam
 	}
 
-	return nil
+	return m, nil
 }
 
 // AddTile adds a tile to the navigation mesh.

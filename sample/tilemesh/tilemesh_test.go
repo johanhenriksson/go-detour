@@ -2,13 +2,12 @@ package tilemesh
 
 import (
 	"bytes"
-	"io/ioutil"
 	"os"
 	"testing"
 
 	"github.com/arl/go-detour/detour"
 	"github.com/arl/go-detour/recast"
-	"github.com/arl/gogeo/f32/d3"
+	"github.com/johanhenriksson/goworld/math/vec3"
 )
 
 func check(t *testing.T, err error) {
@@ -30,12 +29,12 @@ func compareFiles(fn1, fn2 string) (bool, error) {
 		f1, f2 []byte
 		err    error
 	)
-	f1, err = ioutil.ReadFile(fn1)
+	f1, err = os.ReadFile(fn1)
 	if err != nil {
 		return false, err
 	}
 
-	f2, err = ioutil.ReadFile(fn2)
+	f2, err = os.ReadFile(fn2)
 	if err != nil {
 		return false, err
 	}
@@ -214,41 +213,38 @@ func BenchmarkPathFindTileMesh(b *testing.B) {
 		b.Fatalf("couldn't build navmesh for %v", objName)
 	}
 
-	st, query := detour.NewNavMeshQuery(navMesh, 2048)
-	if detour.StatusFailed(st) {
-		b.Fatalf("creation of navmesh query failed: %s", st)
+	query, err := detour.NewNavMeshQuery(navMesh, 2048)
+	if err != nil {
+		b.Fatalf("creation of navmesh query failed: %s", err)
 	}
 
 	const maxPolys = 256
 	var (
 		polys       [maxPolys]detour.PolyRef
-		straight    [maxPolys]d3.Vec3
-		polyPickExt = d3.NewVec3XYZ(2, 4, 2)
-		spos, epos  d3.Vec3
+		straight    [maxPolys]detour.Path
+		polyPickExt = vec3.New(2, 4, 2)
 	)
-
-	spos, epos = d3.NewVec3(), d3.NewVec3()
 
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		for _, bb := range benchs {
-			spos[0], spos[1], spos[2] = bb.xstart, bb.ystart, bb.zstart
-			epos[0], epos[1], epos[2] = bb.xend, bb.yend, bb.zend
+			spos := vec3.New(bb.xstart, bb.ystart, bb.zstart)
+			epos := vec3.New(bb.xend, bb.yend, bb.zend)
 
 			filter := detour.NewStandardQueryFilter()
 			filter.SetIncludeFlags(bb.incFlags)
 			filter.SetExcludeFlags(bb.excFlags)
 
 			var startRef, endRef detour.PolyRef
-			_, startRef, _ = query.FindNearestPoly(spos, polyPickExt, filter)
-			_, endRef, _ = query.FindNearestPoly(epos, polyPickExt, filter)
+			startRef, _, _ = query.FindNearestPoly(spos, polyPickExt, filter)
+			endRef, _, _ = query.FindNearestPoly(epos, polyPickExt, filter)
 
 			// find path
-			npolys, _ := query.FindPath(startRef, endRef, spos, epos, filter, polys[:])
+			polys, _ := query.FindPath(startRef, endRef, spos, epos, filter, polys[:])
 
 			// find straight path
-			if npolys != 0 {
-				query.FindStraightPath(spos, epos, polys[:], straight[:], nil, nil, 0)
+			if len(polys) != 0 {
+				query.FindStraightPath(spos, epos, polys[:], straight[:], 0)
 			}
 		}
 	}
